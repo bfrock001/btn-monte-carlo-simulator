@@ -1,7 +1,7 @@
-# Through the Noise — Monte Carlo Portfolio Simulator
+# Beyond the Noise — Monte Carlo Portfolio Simulator
 
 A browser-based retirement portfolio simulator built for the
-[Through the Noise](https://www.youtube.com/) personal-finance YouTube channel.
+[Beyond the Noise](https://www.youtube.com/) personal-finance YouTube channel.
 Runs 10,000 bootstrapped historical scenarios in a Web Worker, presents the
 results as fan charts, success-rate cards, percentile tables, and an income
 variability report.
@@ -74,13 +74,13 @@ app.js                  — input panel, results rendering, export, modals
 simulation.worker.js    — bootstrap simulation engine (pure JS)
 styles.css              — brand-aligned styles (Editorial palette)
 simba_returns_data.json — historical returns + inflation data
-ttn-logo.svg            — channel mark
+btn-logo.svg            — channel mark
 ```
 
 ### Brand identity
 
 The visual language follows the
-[Through the Noise brand kit](https://github.com/) (Editorial palette by
+[Beyond the Noise brand kit](https://github.com/) (Editorial palette by
 default — paper, ink, navy, gold, teal, clay), using Instrument Serif for
 display copy and IBM Plex Sans for body / data.
 

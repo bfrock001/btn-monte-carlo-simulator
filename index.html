@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Monte Carlo Portfolio Simulation — Through the Noise</title>
+  <title>Monte Carlo Portfolio Simulation — Beyond the Noise</title>
 
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -12,7 +12,7 @@
     rel="stylesheet"
   />
   <link rel="stylesheet" href="styles.css" />
-  <link rel="icon" href="ttn-logo.svg" type="image/svg+xml" />
+  <link rel="icon" href="btn-logo.svg" type="image/svg+xml" />
 </head>
 <body>
   <div class="mobile-banner" role="status">
@@ -22,13 +22,13 @@
   <header class="page-header" role="banner">
     <div class="page-header__inner">
       <a class="brand" href="#top">
-        <img class="brand__logo" src="ttn-logo.svg" alt="Through the Noise logo" />
+        <img class="brand__logo" src="btn-logo.svg" alt="Beyond the Noise logo" />
       </a>
 
       <div class="page-header__titles">
         <h1 class="page-title">Monte Carlo Portfolio Simulation</h1>
         <p class="page-subtitle">Presented by <span class="brand-wordmark">
-          <span class="brand-wordmark__text">Through the <em>Noise</em></span>
+          <span class="brand-wordmark__text">Beyond the <em>Noise</em></span>
           <svg class="signal-mark" viewBox="0 0 240 40" aria-hidden="true" preserveAspectRatio="none">
             <polyline
               points="4,22 16,8 28,30 40,12 52,28 64,14 76,26 88,10 100,28 112,16 124,24 136,12 148,28 160,14 172,30 184,10 196,26 208,16 220,28 232,18"
@@ -471,12 +471,8 @@
 
         <!-- ----- Section: Run Simulation ----- -->
         <section class="input-section input-section--run">
-          <label class="disclaimer" for="disclaimer-check">
-            <input type="checkbox" id="disclaimer-check" />
-            <span>By checking this box, the user agrees to all
-              <a href="#" id="open-terms-link" class="disclaimer__link">terms of use</a>
-              for this tool.</span>
-          </label>
+          <p class="disclaimer-note">See the
+            <a href="#" id="open-terms-link" class="disclaimer__link">Terms of Use</a> for this tool.</p>
 
           <button type="button" id="run-sim" class="btn-primary btn-block" disabled>Run Simulation</button>
           <p id="run-status" class="run-status" aria-live="polite"></p>
@@ -752,7 +748,7 @@
   </main>
 
   <footer class="page-footer">
-    <p>Presented by Through the <em>Noise</em> · For educational purposes only.</p>
+    <p>Presented by Beyond the <em>Noise</em> · For educational purposes only.</p>
     <p class="footer-source">Historical return data: Bogleheads&rsquo; Simba Backtesting Spreadsheet</p>
   </footer>
 
@@ -824,6 +820,29 @@
       <div class="modal-footer">
         <button type="button" id="terms-modal-close-footer-btn" class="btn-text">Close</button>
       </div>
+    </div>
+  </div>
+
+  <!-- Clickwrap acceptance gate — blocks the app until the user accepts the current Terms version -->
+  <div id="termsGate" class="hidden" role="dialog" aria-modal="true" aria-labelledby="gateTitle">
+    <div class="gate-card">
+      <p class="gate-eyebrow">Before you begin</p>
+      <h2 id="gateTitle">Educational tool — please read &amp; accept</h2>
+      <p>This <b>Monte Carlo Portfolio Simulation</b> is a free educational tool for exploring how withdrawal
+        strategies and market sequences might affect a retirement portfolio. It is <b>not</b> financial, tax, legal,
+        or investment advice, and its projections are hypothetical — not predictions or recommendations.</p>
+      <div class="gate-quote">"By clicking 'I Agree,' you acknowledge that this Monte Carlo simulation is an
+        educational modeling tool and not financial, tax, legal, or investment advice; that its outputs are
+        hypothetical projections based on historical data and your own assumptions, not predictions or
+        recommendations; that no fiduciary, advisory, or professional relationship is created by your use of it; that
+        any decisions you make based on it are made at your own risk; and that you have read and agree to the full
+        Terms of Use, Disclaimer, and Limitation of Liability."</div>
+      <div class="gate-actions">
+        <button id="gateAgree" type="button">I Agree — enter the tool</button>
+        <a href="#" id="gate-open-terms" role="button">Read the full Terms of Use &amp; Disclaimer</a>
+      </div>
+      <p class="gate-decline">If you do not agree, please close this page. Nothing you enter is ever sent to us — all
+        calculations run in your browser.</p>
     </div>
   </div>
 

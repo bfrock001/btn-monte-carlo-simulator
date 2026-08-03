@@ -1,5 +1,5 @@
 /* ============================================================
-   Through the Noise — Monte Carlo Portfolio Simulation
+   Beyond the Noise — Monte Carlo Portfolio Simulation
    Brand tokens (Editorial palette)
    ============================================================ */
 
@@ -2339,3 +2339,87 @@ em { font-style: italic; }
   font-size: 15px;
   color: var(--soft);
 }
+
+/* ============================================================
+   Clickwrap acceptance gate — one-time versioned Terms wrapper
+   (replaces the per-run disclaimer checkbox). z-index 990 sits
+   above the app but below .modal-overlay (1000) so the full
+   Terms modal can open on top of the gate.
+   ============================================================ */
+#termsGate {
+  position: fixed;
+  inset: 0;
+  z-index: 990;
+  background: rgba(20, 24, 30, 0.55);
+  backdrop-filter: blur(3px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+#termsGate.hidden { display: none; }
+.gate-card {
+  background: var(--paper);
+  border: 1px solid var(--rule);
+  border-top: 4px solid var(--ink);
+  border-radius: 12px;
+  max-width: 560px;
+  width: 100%;
+  padding: 26px 30px;
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.35);
+  max-height: 88vh;
+  overflow: auto;
+}
+.gate-card h2 {
+  font-family: var(--font-serif);
+  font-weight: 400;
+  font-size: 30px;
+  margin: 0 0 4px;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+}
+.gate-card .gate-eyebrow {
+  color: var(--gold);
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  font-weight: 600;
+  margin: 0 0 4px;
+}
+.gate-card p {
+  font-size: 13.5px;
+  color: var(--soft);
+  line-height: 1.55;
+  margin: 10px 0;
+}
+.gate-card .gate-quote {
+  background: var(--paper-alt);
+  border: 1px solid var(--rule);
+  border-left: 3px solid var(--gold);
+  border-radius: 8px;
+  padding: 10px 14px;
+  font-style: italic;
+  font-size: 12.5px;
+  color: var(--soft);
+}
+.gate-actions {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-top: 16px;
+  flex-wrap: wrap;
+}
+.gate-actions button {
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  padding: 10px 20px;
+  border: 1px solid var(--ink);
+  border-radius: 8px;
+  background: var(--ink);
+  color: var(--paper);
+  cursor: pointer;
+}
+.gate-actions button:hover { background: var(--teal); border-color: var(--teal); }
+.gate-actions a { font-size: 13px; color: var(--teal); cursor: pointer; }
+.gate-decline { font-size: 11.5px; color: var(--faint); margin-top: 10px; }

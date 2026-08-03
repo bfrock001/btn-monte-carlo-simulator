@@ -1,5 +1,5 @@
 /* ============================================================
-   Through the Noise — Monte Carlo Portfolio Simulation
+   Beyond the Noise — Monte Carlo Portfolio Simulation
    Web Worker: bootstrap simulation engine
    Phase 2
    ============================================================

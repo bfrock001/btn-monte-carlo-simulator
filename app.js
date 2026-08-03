@@ -1,5 +1,5 @@
 /* ============================================================
-   Through the Noise — Monte Carlo Portfolio Simulation
+   Beyond the Noise — Monte Carlo Portfolio Simulation
    Phase 1: data layer + asset class reference table
    ============================================================ */
 
@@ -28,6 +28,8 @@ const DATA_URL = './simba_returns_data.json';
    Boot
    ----------------------------------------------------------- */
 document.addEventListener('DOMContentLoaded', () => {
+  // A gate failure must never block the app from loading its data.
+  try { initTermsGate(); } catch (e) { console.error('Terms gate init failed:', e); }
   loadData().catch((err) => showError(err.message || String(err)));
 });
 
@@ -640,9 +642,6 @@ function onWorkerMessage(e) {
     devRenderResults(msg.data);
     WORKER.busy = false;
     setRunButtonBusy(false);
-    // Per spec 4.4.1 — disclaimer resets after each successful run
-    const disc = document.getElementById('disclaimer-check');
-    if (disc) disc.checked = false;
     refreshRunButtonState();
   } else if (msg.type === 'error') {
     devShowError(msg.message || 'Unknown simulation error.');
@@ -1381,12 +1380,7 @@ function bindInputEvents() {
     });
   }
 
-  // Disclaimer + Run + Reset
-  document.getElementById('disclaimer-check')?.addEventListener('change', (e) => {
-    // Record acceptance timestamp on check (a paper trail for the PDF export).
-    INPUT_STATE.terms_accepted_at = e.target.checked ? new Date().toISOString() : null;
-    refreshRunButtonState();
-  });
+  // Run + Reset (Terms acceptance is handled once, up front, by the clickwrap gate)
   document.getElementById('run-sim')?.addEventListener('click', runSimulationFromInputs);
   document.getElementById('reset-defaults')?.addEventListener('click', resetToDefaults);
   // Mirrored Reset button at the top of the input panel (QA / quick-access).
@@ -2016,7 +2010,7 @@ function downloadCSV() {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = `ttn-${slugForFilename(row.label)}-${todayStamp()}.csv`;
+  a.download = `btn-${slugForFilename(row.label)}-${todayStamp()}.csv`;
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
@@ -2149,7 +2143,7 @@ function downloadPDF() {
       doc.setFont('courier', 'normal');
       doc.setFontSize(8);
       doc.setTextColor(...SOFT);
-      doc.text(`Exported ${new Date().toLocaleString()}  ·  TTN MC Simulator`, MARGIN_X, y);
+      doc.text(`Exported ${new Date().toLocaleString()}  ·  Beyond the Noise MC Simulator`, MARGIN_X, y);
       y += SECTION_GAP + 10;
 
       // === Success rate block (compact) ===
@@ -2346,12 +2340,12 @@ function downloadPDF() {
       doc.setFont('courier', 'normal');
       doc.setFontSize(7);
       doc.setTextColor(...SOFT);
-      const footTxt = 'ttn-monte-carlo-simulator';
+      const footTxt = 'btn-monte-carlo-simulator';
       doc.text(footTxt, MARGIN_X, PAGE_H - 20);
       doc.text('Page 1 of 1', PAGE_W - MARGIN_X - doc.getTextWidth('Page 1 of 1'), PAGE_H - 20);
 
       // === Save ===
-      const filename = `ttn-${slugForFilename(label)}-${todayStamp()}.pdf`;
+      const filename = `btn-${slugForFilename(label)}-${todayStamp()}.pdf`;
       doc.save(filename);
       showExportToast('PDF downloaded');
     } catch (e) {
@@ -2602,8 +2596,9 @@ function computeValidation() {
     if (!Number.isFinite(c) || c < 1.0 || c > 15.0) errors.push('VDS ceiling out of range.');
     if (!Number.isFinite(f) || f < 0.5 || f > 10.0) errors.push('VDS floor out of range.');
   }
-  const disc = document.getElementById('disclaimer-check');
-  if (!disc || !disc.checked) errors.push('Acknowledge the disclaimer.');
+  // Terms acceptance is handled once, up front, by the clickwrap gate
+  // (initTermsGate) rather than a per-run checkbox — so it is no longer a
+  // per-simulation validation requirement.
   return { valid: errors.length === 0, errors };
 }
 
@@ -2698,10 +2693,8 @@ function resetToDefaults() {
   INPUT_STATE.minimum_withdrawal_annual = DEFAULTS.minimum_withdrawal_annual;
   INPUT_STATE.strategy_params         = { ...DEFAULTS.strategy_params };
 
-  // Terms of Use acceptance — clear on reset so the user has to re-acknowledge.
-  INPUT_STATE.terms_accepted_at = null;
-  const discCb = document.getElementById('disclaimer-check');
-  if (discCb) discCb.checked = false;
+  // Terms acceptance is a one-time, site-level clickwrap (see initTermsGate) —
+  // it intentionally persists across a Reset to Defaults.
 
   // Re-render
   renderAllocationRows();
@@ -3619,4 +3612,48 @@ function whenDataReady(cb) {
   if (tryNow()) return;
   const iv = setInterval(() => { if (tryNow()) clearInterval(iv); }, 80);
 }
-whenDataReady(initDevPanel);
+// Guard: initDevPanel is an optional/dev-only hook that isn't defined in this
+// build. A bare reference here throws a ReferenceError at load time, so only
+// wire it up if it actually exists.
+if (typeof initDevPanel === 'function') whenDataReady(initDevPanel);
+
+/* ============================================================
+   Clickwrap acceptance gate — one-time, versioned Terms wrapper.
+   Replaces the old per-run disclaimer checkbox: the user accepts
+   once on entry (stored in localStorage), and is re-prompted only
+   when TERMS_VERSION changes. If storage is blocked, they are
+   prompted every visit (fail-safe). Mirrors the Roth Conversion
+   tool's gate.
+   ============================================================ */
+const TERMS_VERSION = '2026-08-03';               // bump whenever the Terms text changes
+const TERMS_KEY = 'btn-mcsim-terms-accepted';
+const TERMS_TS_KEY = 'btn-mcsim-terms-accepted-at';
+function initTermsGate() {
+  const gate = document.getElementById('termsGate');
+  if (!gate) return;
+  let accepted = null, acceptedAt = null;
+  try {
+    accepted = localStorage.getItem(TERMS_KEY);
+    acceptedAt = localStorage.getItem(TERMS_TS_KEY);
+  } catch (e) { /* storage blocked -> always prompt */ }
+  if (accepted === TERMS_VERSION) {
+    // Already accepted this version — seed the PDF paper-trail timestamp.
+    INPUT_STATE.terms_accepted_at = acceptedAt || new Date().toISOString();
+  } else {
+    gate.classList.remove('hidden');
+  }
+  document.getElementById('gateAgree')?.addEventListener('click', () => {
+    const now = new Date().toISOString();
+    INPUT_STATE.terms_accepted_at = now;
+    try {
+      localStorage.setItem(TERMS_KEY, TERMS_VERSION);
+      localStorage.setItem(TERMS_TS_KEY, now);
+    } catch (e) { /* ok — they'll be prompted next visit */ }
+    gate.classList.add('hidden');
+  });
+  // "Read the full Terms" opens the existing Terms modal on top of the gate.
+  document.getElementById('gate-open-terms')?.addEventListener('click', (e) => {
+    e.preventDefault();
+    if (typeof openTermsModal === 'function') openTermsModal();
+  });
+}
