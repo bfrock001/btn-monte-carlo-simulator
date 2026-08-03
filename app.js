@@ -453,7 +453,7 @@ function removeStep3Asset(key) {
 // Called on: range change, custom-year change, add/remove asset, initial data load.
 function refreshStep3Tools() {
   renderCorrelationMatrix();
-  // Phase 3 will hook periodic-table render here.
+  renderPeriodicTable();
 }
 
 /* -----------------------------------------------------------
@@ -712,6 +712,236 @@ function paintCorrelationCell(td, r) {
     td.classList.add('corr-cell--neg');
   }
   if (mag > 0.55) td.classList.add('corr-cell--dark');
+}
+
+/* -----------------------------------------------------------
+   Tool 3 · Periodic Table of Returns (Callan-style)
+   Group-family colors with lightness variation: consistent per asset
+   across every year column so leadership rotation is visible.
+   ----------------------------------------------------------- */
+
+// [hue, sat, lightness] per asset. Group-family hues (navy/teal/gold/clay)
+// with lightness stepping down for narrower / later-vintage styles inside
+// each family. Slight hue nudge separates value (warmer) vs growth (cooler).
+const STEP3_ASSET_HSL = {
+  // US Equity — navy family (h ~208–220)
+  total_market_us:  [214, 55, 27],
+  sp500:            [214, 50, 35],
+  large_cap_blend:  [214, 48, 42],
+  large_cap_value:  [220, 45, 47],
+  large_cap_growth: [208, 45, 47],
+  mid_cap_blend:    [214, 42, 52],
+  mid_cap_value:    [220, 40, 57],
+  mid_cap_growth:   [208, 40, 57],
+  small_cap_blend:  [214, 38, 62],
+  small_cap_value:  [220, 35, 66],
+  small_cap_growth: [208, 35, 66],
+  // International Equity — teal family
+  total_intl:       [180, 61, 27],
+  intl_developed:   [178, 52, 40],
+  emerging_markets: [174, 48, 52],
+  // Fixed Income — gold family
+  total_bond:       [42, 68, 42],
+  lt_treasury:      [35, 62, 32],
+  interm_treasury:  [38, 55, 42],
+  corp_bonds:       [45, 52, 52],
+  tips:             [48, 48, 62],
+  st_tbills:        [52, 45, 72],
+  // Alternatives — clay family
+  reit:             [9,  62, 49],
+  gold:             [22, 68, 60],
+};
+
+function assetColor(key) {
+  const t = STEP3_ASSET_HSL[key];
+  if (!t) return 'hsl(0, 0%, 60%)';
+  return `hsl(${t[0]}, ${t[1]}%, ${t[2]}%)`;
+}
+
+// Text on the swatch flips to --paper when the swatch is dark enough
+// that dark text would fail contrast.
+function assetColorIsDark(key) {
+  const t = STEP3_ASSET_HSL[key];
+  if (!t) return false;
+  return t[2] < 55;
+}
+
+// Signed-pct with proper minus glyph, one decimal.
+function fmtSignedPct(v) {
+  if (v == null || !Number.isFinite(v)) return '—';
+  const s = v >= 0 ? '+' : '−';
+  return s + Math.abs(v).toFixed(1) + '%';
+}
+
+function renderPeriodicTable() {
+  const scroll  = document.getElementById('periodic-scroll');
+  const empty   = document.getElementById('periodic-empty');
+  const legend  = document.getElementById('periodic-legend');
+  const thead   = document.getElementById('periodic-thead');
+  const tbody   = document.getElementById('periodic-tbody');
+  const sub     = document.getElementById('periodic-sub');
+  if (!scroll || !thead || !tbody || !legend) return;
+
+  const selected = STATE.step3.selectedAssets.slice();
+  if (selected.length < 2) {
+    scroll.hidden = true; empty.hidden = false; legend.innerHTML = '';
+    empty.textContent = 'Select at least 2 asset classes above to see the periodic table.';
+    if (sub) sub.textContent = '';
+    return;
+  }
+  if (STATE.period === 'custom' && !STATE.step3.rangeValid) {
+    scroll.hidden = true; empty.hidden = false; legend.innerHTML = '';
+    empty.textContent = 'Periodic table paused — pick a range of at least 10 years above.';
+    if (sub) sub.textContent = '';
+    return;
+  }
+  scroll.hidden = false; empty.hidden = true;
+
+  const [start, end] = getStep3Range();
+  const byKey = new Map(STATE.assets.map((a) => [a.key, a]));
+  const orderIndex = new Map();
+  STATE.assets.forEach((a, i) => orderIndex.set(a.key, i));
+  const keys = selected
+    .filter((k) => byKey.has(k))
+    .sort((a, b) => (orderIndex.get(a) ?? 0) - (orderIndex.get(b) ?? 0));
+
+  // Build a year → data-row map once for O(1) lookups.
+  const rowsByYear = new Map();
+  for (const row of STATE.data.annual_returns) rowsByYear.set(row.year, row);
+
+  // For each year in range, rank the selected assets that have data.
+  const years = [];
+  for (let y = start; y <= end; y++) years.push(y);
+  const yearRankings = new Map();
+  let maxRank = 0;
+  years.forEach((y) => {
+    const row = rowsByYear.get(y);
+    if (!row) { yearRankings.set(y, []); return; }
+    const ranked = keys
+      .filter((k) => row[k] != null)
+      .map((k) => ({ key: k, ret: row[k] }))
+      .sort((a, b) => b.ret - a.ret);
+    if (ranked.length > maxRank) maxRank = ranked.length;
+    yearRankings.set(y, ranked);
+  });
+
+  // Summary column: assets sorted by CAGR desc across the whole range.
+  const stats = new Map();
+  keys.forEach((k) => stats.set(k, step3AssetStats(k, start, end)));
+  const summary = keys.slice().sort((a, b) => {
+    const ca = stats.get(a).cagr, cb = stats.get(b).cagr;
+    return (cb == null ? -Infinity : cb) - (ca == null ? -Infinity : ca);
+  });
+
+  // ---- Legend (color chip + asset name, grouped by family) ----
+  legend.innerHTML = '';
+  keys.forEach((k) => {
+    const asset = byKey.get(k);
+    const item = document.createElement('span');
+    item.className = 'periodic-legend__item';
+    item.dataset.group = groupSlug(asset.group);
+    const chip = document.createElement('span');
+    chip.className = 'periodic-legend__chip';
+    chip.style.background = assetColor(k);
+    const label = document.createElement('span');
+    label.className = 'periodic-legend__label';
+    label.textContent = asset.name;
+    item.appendChild(chip);
+    item.appendChild(label);
+    legend.appendChild(item);
+  });
+
+  // ---- Header row: [Rank] [year1] [year2] ... [yearN] [CAGR summary] ----
+  thead.innerHTML = '';
+  const hr = document.createElement('tr');
+  const rankHead = document.createElement('th');
+  rankHead.className = 'pt-rank-head';
+  rankHead.scope = 'col';
+  rankHead.textContent = 'Rank';
+  hr.appendChild(rankHead);
+  years.forEach((y) => {
+    const th = document.createElement('th');
+    th.className = 'pt-year-head';
+    th.scope = 'col';
+    th.textContent = y;
+    hr.appendChild(th);
+  });
+  const sumHead = document.createElement('th');
+  sumHead.className = 'pt-summary-head';
+  sumHead.scope = 'col';
+  sumHead.innerHTML = `${start}&ndash;${end}<br><span class="pt-summary-head__sub">CAGR / &sigma;</span>`;
+  hr.appendChild(sumHead);
+  thead.appendChild(hr);
+
+  // ---- Body rows: one per rank slot ----
+  tbody.innerHTML = '';
+  for (let rank = 0; rank < maxRank; rank++) {
+    const tr = document.createElement('tr');
+
+    const rh = document.createElement('th');
+    rh.className = 'pt-rank';
+    rh.scope = 'row';
+    rh.textContent = String(rank + 1);
+    tr.appendChild(rh);
+
+    years.forEach((y) => {
+      const ranked = yearRankings.get(y);
+      const entry = ranked[rank];
+      if (!entry) {
+        const td = document.createElement('td');
+        td.className = 'pt-cell pt-cell--empty';
+        tr.appendChild(td);
+        return;
+      }
+      const asset = byKey.get(entry.key);
+      const td = document.createElement('td');
+      td.className = 'pt-cell';
+      td.style.background = assetColor(entry.key);
+      if (assetColorIsDark(entry.key)) td.classList.add('pt-cell--dark');
+      td.dataset.group = groupSlug(asset.group);
+      td.title = `${asset.name} · ${y}: ${fmtSignedPct(entry.ret)}\n` +
+                 `Rank ${rank + 1} of ${ranked.length}`;
+      const label = STEP3_SHORT_LABELS[entry.key] || asset.ticker || asset.name;
+      td.innerHTML =
+        `<span class="pt-cell__label">${escapeHtml(label)}</span>` +
+        `<span class="pt-cell__ret">${fmtSignedPct(entry.ret)}</span>`;
+      tr.appendChild(td);
+    });
+
+    // Summary cell for this rank slot
+    const sumKey = summary[rank];
+    const td = document.createElement('td');
+    td.className = 'pt-summary';
+    if (!sumKey) {
+      td.classList.add('pt-summary--empty');
+    } else {
+      const asset = byKey.get(sumKey);
+      const s = stats.get(sumKey);
+      td.style.background = assetColor(sumKey);
+      if (assetColorIsDark(sumKey)) td.classList.add('pt-summary--dark');
+      td.dataset.group = groupSlug(asset.group);
+      td.title = `${asset.name}\n` +
+                 `CAGR ${s.cagr == null ? '—' : s.cagr.toFixed(2) + '%'} · ` +
+                 `σ ${s.std == null ? '—' : s.std.toFixed(2) + '%'} · ` +
+                 `${s.n} yrs`;
+      const label = STEP3_SHORT_LABELS[sumKey] || asset.ticker || asset.name;
+      td.innerHTML =
+        `<span class="pt-summary__label">${escapeHtml(label)}</span>` +
+        `<span class="pt-summary__cagr">${s.cagr == null ? '—' : s.cagr.toFixed(1) + '%'}</span>` +
+        `<span class="pt-summary__std">σ ${s.std == null ? '—' : s.std.toFixed(1) + '%'}</span>`;
+    }
+    tr.appendChild(td);
+
+    tbody.appendChild(tr);
+  }
+
+  if (sub) {
+    const periodLabel = STATE.period === 'custom'
+      ? `Custom (${start}–${end})`
+      : PERIOD_LABELS[STATE.period].name;
+    sub.textContent =
+      `${keys.length} assets · ${periodLabel} · ${years.length} year column${years.length === 1 ? '' : 's'}.`;
+  }
 }
 
 /* -----------------------------------------------------------

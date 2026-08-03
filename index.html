@@ -824,6 +824,35 @@
           </p>
         </section>
 
+        <!-- ============================================================
+             Tool 3 · Periodic Table of Returns (Callan-style ranking)
+             ============================================================ -->
+        <section id="periodic-section" class="reference-section" aria-labelledby="periodic-heading">
+          <header class="reference-header">
+            <div>
+              <p class="eyebrow">Tool 3 &middot; Rankings</p>
+              <h2 id="periodic-heading" class="reference-heading">Periodic Table of Returns</h2>
+              <p class="reference-sub" id="periodic-sub"></p>
+              <p class="reference-source">Each column ranks the selected asset classes by that year&rsquo;s annual return &middot; consistent color per asset</p>
+            </div>
+          </header>
+
+          <p class="periodic-methodology">
+            Leadership rotates. Each column is one year of the selected range; assets are stacked best (top) to worst (bottom) by that year&rsquo;s annual total return. Each asset keeps the <strong>same color across every column</strong>, so you can trace how it moves through the ranks. Years before an asset&rsquo;s data starts leave a shorter column &mdash; no zero placeholder. The rightmost column ranks the assets by <strong>CAGR</strong> over the whole selected range.
+          </p>
+
+          <div id="periodic-legend" class="periodic-legend" aria-label="Asset color legend"></div>
+
+          <div id="periodic-empty" class="correlation-empty" hidden></div>
+
+          <div id="periodic-scroll" class="periodic-scroll">
+            <table id="periodic-table" class="periodic-table">
+              <thead id="periodic-thead"></thead>
+              <tbody id="periodic-tbody"></tbody>
+            </table>
+          </div>
+        </section>
+
       </div><!-- /tab-data -->
     </div><!-- /app-shell -->
   </main>

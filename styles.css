@@ -664,6 +664,214 @@ em { font-style: italic; }
   color: var(--faint);
 }
 
+/* ============================================================
+   Tool 3 · Periodic Table of Returns
+   ============================================================ */
+.periodic-methodology {
+  font-family: var(--font-sans);
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--soft);
+  background: var(--paper-alt);
+  border-left: 3px solid var(--gold);
+  padding: 10px 14px;
+  margin: 4px 0 14px;
+  border-radius: 0 3px 3px 0;
+}
+.periodic-methodology strong { color: var(--ink); font-weight: 600; }
+
+.periodic-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  margin: 4px 0 14px;
+}
+.periodic-legend__item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-sans);
+  font-size: 12px;
+  color: var(--ink);
+  padding: 3px 8px 3px 3px;
+  border-radius: 999px;
+  background: var(--paper-alt);
+  border: 1px solid var(--rule);
+}
+.periodic-legend__chip {
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 1px solid rgba(20, 24, 30, 0.20);
+  flex: 0 0 auto;
+}
+.periodic-legend__label { white-space: nowrap; }
+
+.periodic-scroll {
+  overflow-x: auto;
+  overflow-y: hidden;
+  border: 1px solid var(--rule);
+  border-radius: 3px;
+  background: var(--paper);
+}
+.periodic-scroll[hidden] { display: none; }
+
+.periodic-table {
+  border-collapse: separate;
+  border-spacing: 0;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+}
+
+/* Header row — years across the top, rank at left, summary at right */
+.periodic-table thead th {
+  padding: 8px 6px;
+  background: var(--paper-alt);
+  color: var(--soft);
+  font-family: var(--font-sans);
+  font-size: 11px;
+  font-weight: 600;
+  border-bottom: 1px solid var(--rule);
+  white-space: nowrap;
+  vertical-align: bottom;
+  letter-spacing: 0.02em;
+}
+.periodic-table thead th.pt-rank-head {
+  min-width: 46px;
+  position: sticky;
+  left: 0;
+  z-index: 3;
+  border-right: 1px solid var(--rule);
+  text-align: center;
+  color: var(--ink);
+}
+.periodic-table thead th.pt-year-head {
+  min-width: 78px;
+  text-align: center;
+  color: var(--ink);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+}
+.periodic-table thead th.pt-summary-head {
+  min-width: 120px;
+  text-align: center;
+  color: var(--ink);
+  border-left: 2px solid var(--rule);
+  background: var(--paper);
+  padding: 8px 10px;
+}
+.pt-summary-head__sub {
+  font-family: var(--font-mono);
+  font-weight: 400;
+  font-size: 10.5px;
+  color: var(--faint);
+  letter-spacing: 0.04em;
+}
+
+/* Rank column (sticky-left) */
+.periodic-table tbody th.pt-rank {
+  min-width: 46px;
+  padding: 6px 6px;
+  text-align: center;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--faint);
+  background: var(--paper);
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  border-right: 1px solid var(--rule);
+  border-bottom: 1px solid var(--rule);
+}
+
+/* Per-year rank cells */
+.periodic-table tbody td.pt-cell {
+  min-width: 78px;
+  padding: 5px 6px;
+  text-align: center;
+  color: var(--ink);
+  border: 1px solid var(--paper);
+  cursor: help;
+  vertical-align: middle;
+  line-height: 1.15;
+  transition: transform 100ms ease;
+}
+.pt-cell--dark { color: var(--paper); }
+.pt-cell--empty {
+  background: transparent !important;
+  border-color: var(--paper) !important;
+  cursor: default;
+}
+.pt-cell__label {
+  display: block;
+  font-family: var(--font-sans);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 74px;
+  margin: 0 auto;
+}
+.pt-cell__ret {
+  display: block;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 500;
+  margin-top: 2px;
+  font-variant-numeric: tabular-nums;
+}
+.periodic-table tbody td.pt-cell:hover:not(.pt-cell--empty) {
+  box-shadow: inset 0 0 0 2px var(--ink), inset 0 0 0 3px var(--paper);
+  position: relative;
+  z-index: 1;
+}
+
+/* Summary column (right side, per-rank CAGR ordering) */
+.periodic-table tbody td.pt-summary {
+  min-width: 120px;
+  padding: 6px 10px;
+  text-align: left;
+  color: var(--ink);
+  border: 1px solid var(--paper);
+  border-left: 2px solid var(--rule);
+  cursor: help;
+  vertical-align: middle;
+  line-height: 1.2;
+}
+.pt-summary--dark { color: var(--paper); }
+.pt-summary--empty {
+  background: transparent !important;
+  cursor: default;
+}
+.pt-summary__label {
+  display: block;
+  font-family: var(--font-sans);
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.pt-summary__cagr {
+  display: inline-block;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 600;
+  margin-right: 6px;
+  font-variant-numeric: tabular-nums;
+}
+.pt-summary__std {
+  display: inline-block;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  opacity: 0.85;
+  font-variant-numeric: tabular-nums;
+}
+
 .period-toggle {
   display: inline-flex;
   background: var(--paper-alt);
