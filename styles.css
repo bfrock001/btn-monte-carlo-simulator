@@ -488,6 +488,182 @@ em { font-style: italic; }
   font-style: italic;
 }
 
+/* ============================================================
+   Tool 2 · Annual Correlation Matrix
+   ============================================================ */
+.correlation-methodology {
+  font-family: var(--font-sans);
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--soft);
+  background: var(--paper-alt);
+  border-left: 3px solid var(--gold);
+  padding: 10px 14px;
+  margin: 4px 0 16px;
+  border-radius: 0 3px 3px 0;
+}
+.correlation-methodology em { font-style: italic; }
+.correlation-methodology strong { color: var(--ink); font-weight: 600; }
+
+.correlation-empty {
+  font-family: var(--font-sans);
+  font-size: 13px;
+  color: var(--faint);
+  font-style: italic;
+  padding: 24px;
+  text-align: center;
+  background: var(--paper-alt);
+  border: 1px dashed var(--rule);
+  border-radius: 3px;
+}
+.correlation-empty[hidden] { display: none; }
+
+.correlation-scroll {
+  overflow-x: auto;
+  margin-top: 4px;
+  border: 1px solid var(--rule);
+  border-radius: 3px;
+  background: var(--paper);
+}
+.correlation-scroll[hidden] { display: none; }
+
+.correlation-table {
+  border-collapse: separate;
+  border-spacing: 0;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  width: 100%;
+}
+.correlation-table thead th {
+  padding: 10px 8px;
+  font-family: var(--font-sans);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--soft);
+  background: var(--paper-alt);
+  border-bottom: 1px solid var(--rule);
+  text-align: center;
+  white-space: nowrap;
+  letter-spacing: 0.02em;
+  vertical-align: bottom;
+}
+.correlation-table thead th.corr-corner {
+  background: var(--paper-alt);
+  min-width: 180px;
+  position: sticky;
+  left: 0;
+  z-index: 3;
+  border-right: 1px solid var(--rule);
+}
+.correlation-table thead th.corr-colhead[data-group="us-equity"]           { border-top: 3px solid var(--navy); }
+.correlation-table thead th.corr-colhead[data-group="international-equity"]{ border-top: 3px solid var(--teal); }
+.correlation-table thead th.corr-colhead[data-group="fixed-income"]        { border-top: 3px solid var(--gold); }
+.correlation-table thead th.corr-colhead[data-group="alternatives"]        { border-top: 3px solid var(--clay); }
+
+.correlation-table thead th.corr-stat-head {
+  min-width: 96px;
+  background: var(--paper);
+  color: var(--ink);
+  border-left: 1px solid var(--rule);
+  font-weight: 600;
+}
+.correlation-table thead th.corr-stat-head--first { border-left-width: 2px; }
+
+.correlation-table tbody th.corr-rowhead {
+  text-align: left;
+  padding: 8px 14px;
+  font-family: var(--font-sans);
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--ink);
+  background: var(--paper);
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  border-right: 1px solid var(--rule);
+  border-bottom: 1px solid var(--rule);
+  white-space: nowrap;
+  border-left: 3px solid transparent;
+}
+.correlation-table tbody th.corr-rowhead[data-group="us-equity"]           { border-left-color: var(--navy); }
+.correlation-table tbody th.corr-rowhead[data-group="international-equity"]{ border-left-color: var(--teal); }
+.correlation-table tbody th.corr-rowhead[data-group="fixed-income"]        { border-left-color: var(--gold); }
+.correlation-table tbody th.corr-rowhead[data-group="alternatives"]        { border-left-color: var(--clay); }
+
+.correlation-table tbody td.corr-cell {
+  text-align: center;
+  padding: 8px 6px;
+  min-width: 58px;
+  color: var(--ink);
+  border-bottom: 1px solid var(--rule);
+  border-right: 1px solid rgba(20, 24, 30, 0.04);
+  font-variant-numeric: tabular-nums;
+  transition: box-shadow 100ms ease;
+  cursor: help;
+}
+.correlation-table tbody td.corr-cell--dark { color: var(--paper); }
+.correlation-table tbody td.corr-cell--diag {
+  background: var(--navy) !important;
+  color: var(--paper);
+  font-weight: 700;
+}
+.correlation-table tbody td.corr-cell--none {
+  background: rgba(20, 24, 30, 0.03) !important;
+  color: var(--faint);
+  font-style: italic;
+}
+.correlation-table tbody td.corr-cell:hover {
+  box-shadow: inset 0 0 0 2px var(--gold);
+  position: relative;
+  z-index: 1;
+}
+
+.correlation-table tbody td.corr-stat {
+  padding: 8px 14px;
+  text-align: right;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--ink);
+  background: var(--paper);
+  border-left: 1px solid var(--rule);
+  border-bottom: 1px solid var(--rule);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* Legend below the matrix — a compact swatch strip */
+.correlation-legend {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin: 14px 0 4px;
+  font-family: var(--font-sans);
+  font-size: 11px;
+  color: var(--soft);
+  flex-wrap: wrap;
+}
+.corr-legend-cell {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 46px;
+  padding: 3px 8px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  border-radius: 2px;
+  color: var(--ink);
+}
+.corr-legend-cell--neg-strong { background: rgba(200, 74, 48, 0.85); color: var(--paper); }
+.corr-legend-cell--neg-mid    { background: rgba(200, 74, 48, 0.42); }
+.corr-legend-cell--zero       { background: rgba(20, 24, 30, 0.04); color: var(--faint); }
+.corr-legend-cell--pos-mid    { background: rgba(31, 61, 107, 0.42); }
+.corr-legend-cell--pos-strong { background: rgba(31, 61, 107, 0.85); color: var(--paper); }
+.corr-legend-label {
+  margin-left: 8px;
+  font-style: italic;
+  color: var(--faint);
+}
+
 .period-toggle {
   display: inline-flex;
   background: var(--paper-alt);

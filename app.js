@@ -199,6 +199,7 @@ function initStep3() {
   bindTabs();
   bindStep3PeriodToggle();
   initStep3AssetSelection();
+  refreshStep3Tools();
 }
 
 function bindTabs() {
@@ -237,7 +238,8 @@ function bindStep3PeriodToggle() {
       });
       const customBox = document.getElementById('step3-custom-range');
       if (customBox) customBox.hidden = period !== 'custom';
-      if (validateStep3Range()) render();
+      if (validateStep3Range()) { render(); refreshStep3Tools(); }
+      else { refreshStep3Tools(); }
     });
   });
 
@@ -252,7 +254,8 @@ function bindStep3PeriodToggle() {
     }
     startSel.addEventListener('change', () => {
       STATE.customRange.start = parseInt(startSel.value, 10);
-      if (validateStep3Range()) render();
+      if (validateStep3Range()) { render(); refreshStep3Tools(); }
+      else { refreshStep3Tools(); }
     });
   }
   if (endSel && endSel.options.length === 0) {
@@ -264,7 +267,8 @@ function bindStep3PeriodToggle() {
     }
     endSel.addEventListener('change', () => {
       STATE.customRange.end = parseInt(endSel.value, 10);
-      if (validateStep3Range()) render();
+      if (validateStep3Range()) { render(); refreshStep3Tools(); }
+      else { refreshStep3Tools(); }
     });
   }
 }
@@ -435,14 +439,279 @@ function addStep3Asset(key) {
   STATE.step3.selectedAssets.push(key);
   saveStep3Selection();
   renderStep3AssetChips();
-  // Phase 2/3 will hook their recompute here.
+  refreshStep3Tools();
 }
 
 function removeStep3Asset(key) {
   STATE.step3.selectedAssets = STATE.step3.selectedAssets.filter((k) => k !== key);
   saveStep3Selection();
   renderStep3AssetChips();
-  // Phase 2/3 will hook their recompute here.
+  refreshStep3Tools();
+}
+
+// Recompute every Step 3 tool that depends on the shared controls.
+// Called on: range change, custom-year change, add/remove asset, initial data load.
+function refreshStep3Tools() {
+  renderCorrelationMatrix();
+  // Phase 3 will hook periodic-table render here.
+}
+
+/* -----------------------------------------------------------
+   Tool 2 · Annual Correlation Matrix
+   Pearson correlation of annual total returns, pairwise common years,
+   per-pair min 10 obs, blue/red heatmap using brand tokens.
+   ----------------------------------------------------------- */
+
+const STEP3_MIN_PAIR_OBS = 10;  // Spec §5
+
+// Compact column-header labels: keep the matrix readable at ~10 assets wide.
+const STEP3_SHORT_LABELS = {
+  total_market_us: 'Total US',
+  sp500: 'S&P 500',
+  large_cap_blend: 'LC Blend',
+  large_cap_value: 'LC Value',
+  large_cap_growth: 'LC Growth',
+  mid_cap_blend: 'MC Blend',
+  mid_cap_value: 'MC Value',
+  mid_cap_growth: 'MC Growth',
+  small_cap_blend: 'SC Blend',
+  small_cap_value: 'SC Value',
+  small_cap_growth: 'SC Growth',
+  total_intl: 'Total Intl',
+  intl_developed: 'Intl Dev',
+  emerging_markets: 'EM',
+  total_bond: 'Total Bond',
+  lt_treasury: 'LT Treasury',
+  interm_treasury: 'Int Treasury',
+  corp_bonds: 'Corp Bonds',
+  tips: 'TIPS',
+  st_tbills: 'T-Bills',
+  reit: 'REIT',
+  gold: 'Gold',
+};
+
+// Return the [start, end] year range from the shared Step 3 controls.
+function getStep3Range() {
+  if (STATE.period === 'custom') return [STATE.customRange.start, STATE.customRange.end];
+  const p = PERIOD_LABELS[STATE.period];
+  return [p.start, p.end];
+}
+
+// Pairwise common-year returns for two asset keys.
+function pairwiseAnnualReturns(keyA, keyB, start, end) {
+  const a = [], b = [];
+  for (const row of STATE.data.annual_returns) {
+    if (row.year < start || row.year > end) continue;
+    const va = row[keyA], vb = row[keyB];
+    if (va == null || vb == null) continue;
+    a.push(va); b.push(vb);
+  }
+  return { a, b, n: a.length };
+}
+
+// Pearson correlation coefficient. Returns null if n < 2 or variance = 0.
+function pearson(a, b) {
+  const n = a.length;
+  if (n < 2) return null;
+  let sumA = 0, sumB = 0;
+  for (let i = 0; i < n; i++) { sumA += a[i]; sumB += b[i]; }
+  const meanA = sumA / n, meanB = sumB / n;
+  let num = 0, varA = 0, varB = 0;
+  for (let i = 0; i < n; i++) {
+    const da = a[i] - meanA, db = b[i] - meanB;
+    num += da * db;
+    varA += da * da;
+    varB += db * db;
+  }
+  const denom = Math.sqrt(varA * varB);
+  if (denom === 0) return null;
+  return num / denom;
+}
+
+// Per-asset CAGR + sample-std over the selected range (annual returns).
+// Returns null when there are no rows for that asset in the range.
+function step3AssetStats(key, start, end) {
+  const returns = [];
+  for (const row of STATE.data.annual_returns) {
+    if (row.year < start || row.year > end) continue;
+    if (row[key] == null) continue;
+    returns.push(row[key]);
+  }
+  const n = returns.length;
+  if (n === 0) return { cagr: null, std: null, n: 0 };
+  let mean = 0; for (const v of returns) mean += v; mean /= n;
+  // Sample std dev (n-1 divisor) per spec §5.
+  let variance = 0; for (const v of returns) { const d = v - mean; variance += d * d; }
+  variance /= Math.max(1, n - 1);
+  const std = Math.sqrt(variance);
+  let logSum = 0; for (const v of returns) logSum += Math.log(1 + v / 100);
+  const cagr = (Math.exp(logSum / n) - 1) * 100;
+  return { cagr, std, n };
+}
+
+function renderCorrelationMatrix() {
+  const scroll = document.getElementById('correlation-scroll');
+  const empty  = document.getElementById('correlation-empty');
+  const sub    = document.getElementById('correlation-sub');
+  const thead  = document.getElementById('correlation-thead');
+  const tbody  = document.getElementById('correlation-tbody');
+  if (!scroll || !thead || !tbody) return;
+
+  const selected = STATE.step3.selectedAssets.slice();
+  if (selected.length < 2) {
+    scroll.hidden = true;
+    empty.hidden = false;
+    empty.textContent = 'Select at least 2 asset classes above to see a correlation matrix.';
+    if (sub) sub.textContent = '';
+    return;
+  }
+  if (STATE.period === 'custom' && !STATE.step3.rangeValid) {
+    scroll.hidden = true;
+    empty.hidden = false;
+    empty.textContent = 'Correlation matrix paused — pick a range of at least 10 years above.';
+    if (sub) sub.textContent = '';
+    return;
+  }
+  scroll.hidden = false;
+  empty.hidden = true;
+
+  const [start, end] = getStep3Range();
+  const byKey = new Map(STATE.assets.map((a) => [a.key, a]));
+  const orderIndex = new Map();
+  STATE.assets.forEach((a, i) => orderIndex.set(a.key, i));
+  const keys = selected
+    .filter((k) => byKey.has(k))
+    .sort((a, b) => (orderIndex.get(a) ?? 0) - (orderIndex.get(b) ?? 0));
+
+  // Per-asset stats (right-side columns)
+  const stats = new Map();
+  keys.forEach((k) => stats.set(k, step3AssetStats(k, start, end)));
+
+  // Overall N: intersection of all selected assets over the range.
+  let overallN = 0;
+  for (const row of STATE.data.annual_returns) {
+    if (row.year < start || row.year > end) continue;
+    if (keys.every((k) => row[k] != null)) overallN++;
+  }
+
+  // ---- thead ----
+  thead.innerHTML = '';
+  const headRow = document.createElement('tr');
+  headRow.appendChild(headCell('corr-corner', ''));
+  keys.forEach((k) => {
+    const asset = byKey.get(k);
+    const th = document.createElement('th');
+    th.className = 'corr-colhead';
+    th.scope = 'col';
+    th.title = asset.name;
+    th.dataset.group = groupSlug(asset.group);
+    th.textContent = STEP3_SHORT_LABELS[k] || asset.ticker || asset.name;
+    headRow.appendChild(th);
+  });
+  ['Ann. Return', 'Ann. Std Dev'].forEach((label, i) => {
+    const th = document.createElement('th');
+    th.className = 'corr-stat-head' + (i === 0 ? ' corr-stat-head--first' : '');
+    th.scope = 'col';
+    th.textContent = label;
+    headRow.appendChild(th);
+  });
+  thead.appendChild(headRow);
+
+  // ---- tbody ----
+  tbody.innerHTML = '';
+  keys.forEach((rowKey, rowIdx) => {
+    const rowAsset = byKey.get(rowKey);
+    const tr = document.createElement('tr');
+
+    const rowHead = document.createElement('th');
+    rowHead.className = 'corr-rowhead';
+    rowHead.scope = 'row';
+    rowHead.dataset.group = groupSlug(rowAsset.group);
+    rowHead.title = rowAsset.name;
+    rowHead.textContent = rowAsset.name;
+    tr.appendChild(rowHead);
+
+    keys.forEach((colKey, colIdx) => {
+      const td = document.createElement('td');
+      td.className = 'corr-cell';
+      if (rowKey === colKey) {
+        td.classList.add('corr-cell--diag');
+        td.textContent = '1.00';
+        td.title = `${rowAsset.name}`;
+      } else {
+        const pair = pairwiseAnnualReturns(rowKey, colKey, start, end);
+        if (pair.n < STEP3_MIN_PAIR_OBS) {
+          td.classList.add('corr-cell--none');
+          td.textContent = '—';
+          td.title = `Not enough overlapping annual data (${pair.n} common years; need ≥ ${STEP3_MIN_PAIR_OBS}).`;
+        } else {
+          const r = pearson(pair.a, pair.b);
+          if (r == null) {
+            td.classList.add('corr-cell--none');
+            td.textContent = '—';
+            td.title = 'Correlation undefined (zero variance).';
+          } else {
+            paintCorrelationCell(td, r);
+            td.textContent = formatCorr(r);
+            td.title = `${rowAsset.name} × ${byKey.get(colKey).name}\n` +
+                       `r = ${r.toFixed(4)} · ${pair.n} common years (${start}–${end})`;
+          }
+        }
+      }
+      tr.appendChild(td);
+    });
+
+    const rowStats = stats.get(rowKey);
+    const cagrTd = document.createElement('td');
+    cagrTd.className = 'corr-stat';
+    cagrTd.textContent = rowStats.cagr == null ? '—' : `${rowStats.cagr.toFixed(2)}%`;
+    tr.appendChild(cagrTd);
+    const stdTd = document.createElement('td');
+    stdTd.className = 'corr-stat';
+    stdTd.textContent = rowStats.std == null ? '—' : `${rowStats.std.toFixed(2)}%`;
+    tr.appendChild(stdTd);
+
+    tbody.appendChild(tr);
+  });
+
+  // Subtitle: N assets, range, overall N intersection years, methodology hint.
+  if (sub) {
+    const periodLabel = STATE.period === 'custom'
+      ? `Custom (${start}–${end})`
+      : PERIOD_LABELS[STATE.period].name;
+    sub.textContent =
+      `${keys.length} assets · ${periodLabel} · ` +
+      `${overallN} year${overallN === 1 ? '' : 's'} where all selected assets overlap.`;
+  }
+}
+
+function headCell(className, text) {
+  const th = document.createElement('th');
+  th.className = className;
+  th.textContent = text;
+  return th;
+}
+
+// Format a correlation value: signed, 2 decimals, no leading zero-int loss.
+function formatCorr(r) {
+  const sign = r < 0 ? '−' : '';   // proper minus glyph
+  return sign + Math.abs(r).toFixed(2);
+}
+
+// Paint a cell background using alpha-blended brand tokens over paper:
+//   positive r → navy at alpha |r| ; negative r → clay at alpha |r|.
+// Text stays dark until |r| passes ~0.55, then flips to paper for contrast.
+function paintCorrelationCell(td, r) {
+  const mag = Math.min(1, Math.abs(r));
+  const alpha = Math.max(0.06, mag * 0.85);   // don't wash cells to invisible
+  if (r >= 0) {
+    td.style.background = `rgba(31, 61, 107, ${alpha})`;   // --navy
+    td.classList.add('corr-cell--pos');
+  } else {
+    td.style.background = `rgba(200, 74, 48, ${alpha})`;   // --clay
+    td.classList.add('corr-cell--neg');
+  }
+  if (mag > 0.55) td.classList.add('corr-cell--dark');
 }
 
 /* -----------------------------------------------------------

@@ -788,6 +788,42 @@
       </ul>
     </section>
 
+        <!-- ============================================================
+             Tool 2 · Annual Correlation Matrix (Pearson, annual returns)
+             ============================================================ -->
+        <section id="correlation-section" class="reference-section" aria-labelledby="correlation-heading">
+          <header class="reference-header">
+            <div>
+              <p class="eyebrow">Tool 2 &middot; Correlation</p>
+              <h2 id="correlation-heading" class="reference-heading">Annual Correlation Matrix</h2>
+              <p class="reference-sub" id="correlation-sub"></p>
+              <p class="reference-source">Basis: Annual total returns &middot; Pearson correlation on pairwise common years</p>
+            </div>
+          </header>
+
+          <p class="correlation-methodology">
+            Correlations are computed from <strong>annual total returns</strong> over the selected range. Annual data is coarser than the monthly/daily correlations some tools show &mdash; treat these as <em>directional</em>, not precise. Each pair uses only years where both assets have data (so different asset start dates don&rsquo;t skew the result). Pairs with fewer than 10 common annual observations render as &ldquo;&mdash;&rdquo;.
+          </p>
+
+          <div id="correlation-empty" class="correlation-empty" hidden></div>
+
+          <div id="correlation-scroll" class="correlation-scroll">
+            <table id="correlation-table" class="correlation-table">
+              <thead id="correlation-thead"></thead>
+              <tbody id="correlation-tbody"></tbody>
+            </table>
+          </div>
+
+          <p class="correlation-legend" aria-hidden="true">
+            <span class="corr-legend-cell corr-legend-cell--neg-strong">&minus;1.0</span>
+            <span class="corr-legend-cell corr-legend-cell--neg-mid">&minus;0.5</span>
+            <span class="corr-legend-cell corr-legend-cell--zero">0.0</span>
+            <span class="corr-legend-cell corr-legend-cell--pos-mid">+0.5</span>
+            <span class="corr-legend-cell corr-legend-cell--pos-strong">+1.0</span>
+            <span class="corr-legend-label">Negative &larr; correlation &rarr; Positive</span>
+          </p>
+        </section>
+
       </div><!-- /tab-data -->
     </div><!-- /app-shell -->
   </main>
