@@ -54,9 +54,21 @@
     </div>
 
     <!-- ============================================================
+         Tabbed app shell: [Simulator] [Data & Correlations]
+         ============================================================ -->
+    <div id="app-shell" hidden>
+      <nav class="tab-nav" role="tablist" aria-label="App section">
+        <button class="tab-btn is-active" role="tab" data-tab="simulator" id="tab-btn-simulator" aria-selected="true" aria-controls="tab-simulator">Simulator</button>
+        <button class="tab-btn" role="tab" data-tab="data" id="tab-btn-data" aria-selected="false" aria-controls="tab-data">Data &amp; Correlations</button>
+      </nav>
+
+      <!-- =============== TAB: SIMULATOR =============== -->
+      <div id="tab-simulator" class="tab-panel is-active" role="tabpanel" aria-labelledby="tab-btn-simulator">
+
+    <!-- ============================================================
          Three-panel layout: input column (left) + results (right)
          ============================================================ -->
-    <div id="app-layout" class="layout" hidden>
+    <div id="app-layout" class="layout">
 
       <!-- =============== LEFT: INPUT PANEL =============== -->
       <aside class="input-panel" aria-label="Simulation inputs">
@@ -679,34 +691,64 @@
       </div>
     </div>
 
-    <!-- ============================================================
-         Asset Class Reference Table — full width below panels
-         ============================================================ -->
-    <section id="reference-section" class="reference-section" hidden aria-labelledby="reference-heading-ref">
+      </div><!-- /tab-simulator -->
+
+      <!-- =============== TAB: DATA & CORRELATIONS =============== -->
+      <div id="tab-data" class="tab-panel" role="tabpanel" aria-labelledby="tab-btn-data" hidden>
+
+        <!-- Shared Step 3 controls: date range + asset selection drive all tools below -->
+        <section class="step3-controls" aria-labelledby="step3-controls-heading">
+          <header class="step3-controls__head">
+            <p class="eyebrow">Step 3 · Data &amp; Correlations</p>
+            <h2 id="step3-controls-heading" class="reference-heading">Set the date range &amp; asset selection</h2>
+            <p class="reference-sub">All tools below recompute from the same date range. Asset selection drives the periodic table and correlation matrix (the asset stats table always shows all 22 assets).</p>
+          </header>
+
+          <div class="step3-controls__grid">
+            <div class="step3-controls__field">
+              <label class="field-label">Date range</label>
+              <div class="period-toggle" role="tablist" aria-label="Historical period">
+                <button class="period-btn" role="tab" data-period="native" aria-selected="false">Full Data Set</button>
+                <button class="period-btn" role="tab" data-period="postwar" aria-selected="false">Post-WWII (1946–2025)</button>
+                <button class="period-btn is-active" role="tab" data-period="modern" aria-selected="true">Modern era (1972–2025)</button>
+                <button class="period-btn" role="tab" data-period="custom" aria-selected="false">Custom range</button>
+              </div>
+              <div id="step3-custom-range" class="ref-custom-range" hidden>
+                <div class="ref-custom-range__inner">
+                  <label class="field-label small" for="step3-custom-start">Start year</label>
+                  <select id="step3-custom-start" class="select"></select>
+                  <label class="field-label small" for="step3-custom-end">End year</label>
+                  <select id="step3-custom-end" class="select"></select>
+                </div>
+                <p id="step3-custom-range-error" class="field-error" hidden>Select a range of at least 10 years &mdash; correlations and rankings need enough annual data to be meaningful.</p>
+              </div>
+            </div>
+
+            <div class="step3-controls__field">
+              <label class="field-label">Selected asset classes <span class="step3-count" id="step3-selected-count"></span></label>
+              <div id="step3-asset-chips" class="asset-chip-list" aria-live="polite"></div>
+              <div class="asset-selector">
+                <button type="button" id="step3-add-asset-btn" class="asset-selector__toggle" aria-haspopup="menu" aria-expanded="false">+ Add asset class &#x25BE;</button>
+                <div id="step3-add-asset-menu" class="asset-selector__menu" hidden role="menu"></div>
+              </div>
+              <p id="step3-asset-warning" class="field-warning" hidden></p>
+              <p class="field-note">Curated defaults are pre-selected. Add or remove any of the 22 asset classes above. Minimum 2 for correlations. Selection persists across visits.</p>
+            </div>
+          </div>
+        </section>
+
+        <!-- ============================================================
+             Tool 1 · Asset Class Reference Data (existing stats table)
+             ============================================================ -->
+    <section id="reference-section" class="reference-section" aria-labelledby="reference-heading-ref">
       <header class="reference-header">
         <div>
-          <p class="eyebrow">Reference · Historical Data</p>
+          <p class="eyebrow">Tool 1 &middot; Historical stats</p>
           <h2 id="reference-heading-ref" class="reference-heading">Asset Class Reference Data</h2>
           <p class="reference-sub" id="reference-sub"></p>
           <p class="reference-source">Source: Bogleheads&rsquo; Simba Backtesting Spreadsheet</p>
         </div>
-        <div class="period-toggle" role="tablist" aria-label="Historical period">
-          <button class="period-btn" role="tab" data-period="native" aria-selected="false">Full Data Set</button>
-          <button class="period-btn" role="tab" data-period="postwar" aria-selected="false">Post-WWII (1946–2025)</button>
-          <button class="period-btn is-active" role="tab" data-period="modern" aria-selected="true">Modern era (1972–2025)</button>
-          <button class="period-btn" role="tab" data-period="custom" aria-selected="false">Custom range</button>
-        </div>
       </header>
-
-      <div id="ref-custom-range" class="ref-custom-range" hidden>
-        <div class="ref-custom-range__inner">
-          <label class="field-label small" for="ref-custom-start">Start year</label>
-          <select id="ref-custom-start" class="select"></select>
-          <label class="field-label small" for="ref-custom-end">End year</label>
-          <select id="ref-custom-end" class="select"></select>
-        </div>
-        <p id="ref-custom-range-error" class="field-error" hidden>End year must be at least 5 years after start year.</p>
-      </div>
 
       <div id="period-warning" class="period-warning" hidden></div>
 
@@ -745,6 +787,9 @@
         <li><span class="badge badge--limited">Limited history</span> Native data begins 1980 or later</li>
       </ul>
     </section>
+
+      </div><!-- /tab-data -->
+    </div><!-- /app-shell -->
   </main>
 
   <footer class="page-footer">

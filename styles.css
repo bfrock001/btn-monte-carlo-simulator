@@ -270,6 +270,224 @@ em { font-style: italic; }
   margin: 6px 0 0;
 }
 
+/* ============================================================
+   Tabbed app shell (Step 3 introduces top-level tabs)
+   ============================================================ */
+.tab-nav {
+  display: flex;
+  gap: 4px;
+  border-bottom: 1px solid var(--rule);
+  margin: 4px 0 22px;
+}
+.tab-btn {
+  background: transparent;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  padding: 12px 20px;
+  font-family: var(--font-sans);
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  color: var(--soft);
+  cursor: pointer;
+  transition: color 140ms ease, border-color 140ms ease;
+  margin-bottom: -1px;
+}
+.tab-btn:hover { color: var(--ink); }
+.tab-btn.is-active {
+  color: var(--ink);
+  border-bottom-color: var(--gold);
+}
+.tab-btn:focus-visible {
+  outline: 2px solid var(--gold);
+  outline-offset: 2px;
+}
+.tab-panel[hidden] { display: none !important; }
+
+/* ============================================================
+   Step 3 shared controls (date range + asset selection)
+   ============================================================ */
+.step3-controls {
+  background: var(--paper-alt);
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  padding: 24px 24px 22px;
+  margin-bottom: 24px;
+}
+.step3-controls__head {
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--rule);
+  margin-bottom: 20px;
+}
+.step3-controls__head .reference-sub { margin-top: 6px; }
+.step3-controls__grid {
+  display: grid;
+  grid-template-columns: minmax(320px, auto) 1fr;
+  gap: 32px;
+  align-items: start;
+}
+@media (max-width: 900px) {
+  .step3-controls__grid { grid-template-columns: 1fr; gap: 20px; }
+}
+.step3-controls__field .field-label { margin-bottom: 8px; }
+.step3-controls__field .period-toggle { display: flex; flex-wrap: wrap; }
+.step3-controls__field .ref-custom-range { margin-top: 10px; }
+.step3-count {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--faint);
+  letter-spacing: 0.03em;
+  margin-left: 6px;
+}
+
+/* ============================================================
+   Asset chip list (Step 3 selection)
+   Group-family colors: navy=US, teal=Intl, gold=FI, clay=Alt
+   ============================================================ */
+.asset-chip-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 4px 0 10px;
+  min-height: 32px;
+}
+.asset-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 4px 4px 10px;
+  border-radius: 999px;
+  font-family: var(--font-sans);
+  font-size: 12.5px;
+  font-weight: 500;
+  line-height: 1.1;
+  background: rgba(31, 61, 107, 0.10);
+  color: var(--navy);
+  border: 1px solid rgba(31, 61, 107, 0.28);
+  transition: background 120ms ease;
+}
+.asset-chip__label { white-space: nowrap; }
+.asset-chip__remove {
+  border: 0;
+  background: rgba(20, 24, 30, 0.06);
+  color: inherit;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  transition: background 120ms ease;
+}
+.asset-chip__remove:hover { background: rgba(20, 24, 30, 0.20); }
+.asset-chip__remove:focus-visible {
+  outline: 2px solid var(--gold);
+  outline-offset: 1px;
+}
+.asset-chip[data-group="us-equity"] {
+  background: rgba(31, 61, 107, 0.10); color: var(--navy);
+  border-color: rgba(31, 61, 107, 0.28);
+}
+.asset-chip[data-group="international-equity"] {
+  background: rgba(26, 110, 110, 0.12); color: var(--teal);
+  border-color: rgba(26, 110, 110, 0.30);
+}
+.asset-chip[data-group="fixed-income"] {
+  background: rgba(181, 136, 32, 0.12); color: var(--gold);
+  border-color: rgba(181, 136, 32, 0.30);
+}
+.asset-chip[data-group="alternatives"] {
+  background: rgba(200, 74, 48, 0.10); color: var(--clay);
+  border-color: rgba(200, 74, 48, 0.30);
+}
+
+/* ============================================================
+   Asset selector (Add asset ▾ dropdown menu)
+   ============================================================ */
+.asset-selector {
+  position: relative;
+  display: inline-block;
+  margin-top: 2px;
+}
+.asset-selector__toggle {
+  background: transparent;
+  border: 1px dashed var(--rule);
+  color: var(--soft);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  font-weight: 500;
+  padding: 6px 12px;
+  border-radius: 3px;
+  cursor: pointer;
+  transition: color 120ms ease, border-color 120ms ease;
+}
+.asset-selector__toggle:hover {
+  color: var(--ink);
+  border-color: var(--soft);
+}
+.asset-selector__toggle:focus-visible {
+  outline: 2px solid var(--gold);
+  outline-offset: 2px;
+}
+.asset-selector__menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 20;
+  min-width: 280px;
+  max-height: 340px;
+  overflow-y: auto;
+  background: var(--paper);
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  box-shadow: 0 8px 24px rgba(20, 24, 30, 0.14);
+  padding: 6px 0;
+}
+.asset-selector__menu[hidden] { display: none; }
+.asset-selector__group {
+  font-family: var(--font-sans);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--faint);
+  padding: 10px 14px 4px;
+}
+.asset-selector__item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  padding: 7px 14px;
+  font-family: var(--font-sans);
+  font-size: 13px;
+  color: var(--ink);
+  cursor: pointer;
+  border-left: 3px solid transparent;
+}
+.asset-selector__item:hover,
+.asset-selector__item:focus-visible {
+  background: var(--paper-alt);
+  outline: none;
+}
+.asset-selector__item[data-group="us-equity"]           { border-left-color: var(--navy); }
+.asset-selector__item[data-group="international-equity"]{ border-left-color: var(--teal); }
+.asset-selector__item[data-group="fixed-income"]        { border-left-color: var(--gold); }
+.asset-selector__item[data-group="alternatives"]        { border-left-color: var(--clay); }
+.asset-selector__empty {
+  padding: 12px 14px;
+  font-family: var(--font-sans);
+  font-size: 13px;
+  color: var(--faint);
+  font-style: italic;
+}
+
 .period-toggle {
   display: inline-flex;
   background: var(--paper-alt);

@@ -9,8 +9,12 @@ const STATE = {
   data: null,            // parsed simba_returns_data.json
   assets: [],            // array of asset records (key, name, ticker, group, ...)
   period: 'modern',      // 'native' | 'postwar' | 'modern' | 'custom'
-  customRange: { start: 1972, end: 2025 }, // reference-table custom range
+  customRange: { start: 1972, end: 2025 }, // shared Step 3 date range
   sort: { key: 'cagr', dir: 'desc' },
+  step3: {
+    selectedAssets: [],  // populated in initStep3AssetSelection
+    rangeValid: true,    // false when custom range < 10 years
+  },
 };
 
 const GROUP_ORDER = ['US Equity', 'International Equity', 'Fixed Income', 'Alternatives'];
@@ -57,10 +61,9 @@ async function loadData() {
   STATE.assets = buildAssetList(json.assets);
 
   hideElement('loading-state');
-  showElement('app-layout');
-  showElement('reference-section');
+  showElement('app-shell');
 
-  bindPeriodToggle();
+  initStep3();
   bindSortHeaders();
   render();
 
@@ -178,30 +181,70 @@ const QUALITY_INFO = {
 };
 
 /* -----------------------------------------------------------
-   Period selection (toggle)
+   Step 3: shared controls (tabs + date range + asset selection)
    ----------------------------------------------------------- */
-function bindPeriodToggle() {
-  // Period buttons
-  document.querySelectorAll('.period-btn').forEach((btn) => {
+
+// Curated default asset set per Step 3 spec §3.2.
+const STEP3_DEFAULT_ASSETS = [
+  'total_market_us', 'mid_cap_blend', 'small_cap_blend',
+  'intl_developed', 'emerging_markets',
+  'total_bond', 'lt_treasury', 'tips',
+  'reit', 'gold', 'st_tbills',
+];
+const STEP3_STORAGE_KEY = 'btn-mcsim-step3-selection';
+const STEP3_MIN_YEARS = 10;   // Spec §3.1 hard rule
+const STEP3_SOFT_CAP = 14;    // Spec §3.2 soft cap for readability
+
+function initStep3() {
+  bindTabs();
+  bindStep3PeriodToggle();
+  initStep3AssetSelection();
+}
+
+function bindTabs() {
+  const tabs = document.querySelectorAll('.tab-btn');
+  const panelIds = { simulator: 'tab-simulator', data: 'tab-data' };
+  tabs.forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const target = btn.dataset.tab;
+      if (!target) return;
+      tabs.forEach((b) => {
+        const active = b.dataset.tab === target;
+        b.classList.toggle('is-active', active);
+        b.setAttribute('aria-selected', active ? 'true' : 'false');
+      });
+      Object.entries(panelIds).forEach(([key, id]) => {
+        const panel = document.getElementById(id);
+        if (!panel) return;
+        const isActive = key === target;
+        panel.hidden = !isActive;
+        panel.classList.toggle('is-active', isActive);
+      });
+    });
+  });
+}
+
+function bindStep3PeriodToggle() {
+  document.querySelectorAll('#tab-data .period-btn').forEach((btn) => {
     btn.addEventListener('click', () => {
       const period = btn.dataset.period;
       if (!period || period === STATE.period) return;
       STATE.period = period;
-      document.querySelectorAll('.period-btn').forEach((b) => {
+      document.querySelectorAll('#tab-data .period-btn').forEach((b) => {
         const active = b.dataset.period === period;
         b.classList.toggle('is-active', active);
         b.setAttribute('aria-selected', active ? 'true' : 'false');
       });
-      document.getElementById('ref-custom-range').hidden = period !== 'custom';
-      render();
+      const customBox = document.getElementById('step3-custom-range');
+      if (customBox) customBox.hidden = period !== 'custom';
+      if (validateStep3Range()) render();
     });
   });
 
-  // Populate the custom-range year dropdowns once.
-  const startSel = document.getElementById('ref-custom-start');
-  const endSel   = document.getElementById('ref-custom-end');
+  const startSel = document.getElementById('step3-custom-start');
+  const endSel   = document.getElementById('step3-custom-end');
   if (startSel && startSel.options.length === 0) {
-    for (let y = 1871; y <= 2020; y++) {
+    for (let y = 1871; y <= 2015; y++) {
       const opt = document.createElement('option');
       opt.value = y; opt.textContent = y;
       if (y === STATE.customRange.start) opt.selected = true;
@@ -209,11 +252,11 @@ function bindPeriodToggle() {
     }
     startSel.addEventListener('change', () => {
       STATE.customRange.start = parseInt(startSel.value, 10);
-      validateAndRenderCustomRange();
+      if (validateStep3Range()) render();
     });
   }
   if (endSel && endSel.options.length === 0) {
-    for (let y = 1876; y <= 2025; y++) {
+    for (let y = 1881; y <= 2025; y++) {
       const opt = document.createElement('option');
       opt.value = y; opt.textContent = y;
       if (y === STATE.customRange.end) opt.selected = true;
@@ -221,17 +264,185 @@ function bindPeriodToggle() {
     }
     endSel.addEventListener('change', () => {
       STATE.customRange.end = parseInt(endSel.value, 10);
-      validateAndRenderCustomRange();
+      if (validateStep3Range()) render();
     });
   }
 }
 
-function validateAndRenderCustomRange() {
-  const errEl = document.getElementById('ref-custom-range-error');
+// Returns true when the current range is usable (>= STEP3_MIN_YEARS spans),
+// and toggles the inline error message accordingly. Presets are always valid.
+function validateStep3Range() {
+  const errEl = document.getElementById('step3-custom-range-error');
+  if (STATE.period !== 'custom') {
+    if (errEl) errEl.hidden = true;
+    STATE.step3.rangeValid = true;
+    return true;
+  }
   const gap = STATE.customRange.end - STATE.customRange.start;
-  if (errEl) errEl.hidden = gap >= 5;
-  if (gap < 5) return; // skip render when range is invalid
-  render();
+  const valid = gap >= STEP3_MIN_YEARS;
+  if (errEl) errEl.hidden = valid;
+  STATE.step3.rangeValid = valid;
+  return valid;
+}
+
+function initStep3AssetSelection() {
+  const validKeys = new Set(STATE.assets.map((a) => a.key));
+  let stored = null;
+  try { stored = JSON.parse(localStorage.getItem(STEP3_STORAGE_KEY)); } catch {}
+  const restored = Array.isArray(stored) ? stored.filter((k) => validKeys.has(k)) : null;
+  STATE.step3.selectedAssets =
+    (restored && restored.length >= 2)
+      ? restored
+      : STEP3_DEFAULT_ASSETS.filter((k) => validKeys.has(k));
+
+  renderStep3AssetChips();
+  bindStep3AddAssetMenu();
+}
+
+function saveStep3Selection() {
+  try { localStorage.setItem(STEP3_STORAGE_KEY, JSON.stringify(STATE.step3.selectedAssets)); } catch {}
+}
+
+function groupSlug(group) {
+  return String(group || '').toLowerCase().replace(/\s+/g, '-');
+}
+
+function renderStep3AssetChips() {
+  const chipContainer = document.getElementById('step3-asset-chips');
+  if (!chipContainer) return;
+  chipContainer.innerHTML = '';
+
+  const byKey = new Map(STATE.assets.map((a) => [a.key, a]));
+  const orderIndex = new Map();
+  STATE.assets.forEach((a, i) => orderIndex.set(a.key, i));
+  const sorted = [...STATE.step3.selectedAssets]
+    .sort((a, b) => (orderIndex.get(a) ?? 0) - (orderIndex.get(b) ?? 0));
+
+  sorted.forEach((key) => {
+    const asset = byKey.get(key);
+    if (!asset) return;
+    const chip = document.createElement('span');
+    chip.className = 'asset-chip';
+    chip.dataset.group = groupSlug(asset.group);
+    chip.innerHTML =
+      `<span class="asset-chip__label">${escapeHtml(asset.name)}</span>` +
+      `<button type="button" class="asset-chip__remove" aria-label="Remove ${escapeHtml(asset.name)}" data-key="${escapeHtml(key)}">&times;</button>`;
+    chipContainer.appendChild(chip);
+  });
+
+  chipContainer.querySelectorAll('.asset-chip__remove').forEach((btn) => {
+    btn.addEventListener('click', () => removeStep3Asset(btn.dataset.key));
+  });
+
+  updateStep3AssetCount();
+}
+
+function updateStep3AssetCount() {
+  const countEl = document.getElementById('step3-selected-count');
+  const warnEl  = document.getElementById('step3-asset-warning');
+  const n = STATE.step3.selectedAssets.length;
+  if (countEl) countEl.textContent = `(${n} selected)`;
+  if (!warnEl) return;
+  if (n < 2) {
+    warnEl.hidden = false;
+    warnEl.textContent = 'Select at least 2 asset classes so the correlation matrix and periodic table have something to compare.';
+  } else if (n > STEP3_SOFT_CAP) {
+    warnEl.hidden = false;
+    warnEl.textContent = `Note: the periodic table gets hard to read beyond ${STEP3_SOFT_CAP} asset classes. You can still proceed.`;
+  } else {
+    warnEl.hidden = true;
+    warnEl.textContent = '';
+  }
+}
+
+function bindStep3AddAssetMenu() {
+  const btn  = document.getElementById('step3-add-asset-btn');
+  const menu = document.getElementById('step3-add-asset-menu');
+  if (!btn || !menu) return;
+
+  btn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const willOpen = menu.hidden;
+    if (willOpen) buildStep3AddAssetMenu();
+    menu.hidden = !willOpen;
+    btn.setAttribute('aria-expanded', willOpen ? 'true' : 'false');
+  });
+
+  document.addEventListener('click', (e) => {
+    if (menu.hidden) return;
+    if (menu.contains(e.target) || e.target === btn) return;
+    menu.hidden = true;
+    btn.setAttribute('aria-expanded', 'false');
+  });
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && !menu.hidden) {
+      menu.hidden = true;
+      btn.setAttribute('aria-expanded', 'false');
+      btn.focus();
+    }
+  });
+}
+
+function buildStep3AddAssetMenu() {
+  const menu = document.getElementById('step3-add-asset-menu');
+  if (!menu) return;
+  menu.innerHTML = '';
+
+  const selected = new Set(STATE.step3.selectedAssets);
+  const available = STATE.assets.filter((a) => !selected.has(a.key));
+
+  if (available.length === 0) {
+    const empty = document.createElement('div');
+    empty.className = 'asset-selector__empty';
+    empty.textContent = 'All asset classes are already selected.';
+    menu.appendChild(empty);
+    return;
+  }
+
+  const byGroup = new Map();
+  available.forEach((a) => {
+    if (!byGroup.has(a.group)) byGroup.set(a.group, []);
+    byGroup.get(a.group).push(a);
+  });
+
+  GROUP_ORDER.forEach((group) => {
+    if (!byGroup.has(group)) return;
+    const heading = document.createElement('div');
+    heading.className = 'asset-selector__group';
+    heading.textContent = group;
+    menu.appendChild(heading);
+    byGroup.get(group).forEach((a) => {
+      const item = document.createElement('button');
+      item.type = 'button';
+      item.className = 'asset-selector__item';
+      item.dataset.group = groupSlug(a.group);
+      item.dataset.key = a.key;
+      item.textContent = a.name;
+      item.addEventListener('click', () => {
+        addStep3Asset(a.key);
+        menu.hidden = true;
+        const btn = document.getElementById('step3-add-asset-btn');
+        if (btn) btn.setAttribute('aria-expanded', 'false');
+      });
+      menu.appendChild(item);
+    });
+  });
+}
+
+function addStep3Asset(key) {
+  if (STATE.step3.selectedAssets.includes(key)) return;
+  STATE.step3.selectedAssets.push(key);
+  saveStep3Selection();
+  renderStep3AssetChips();
+  // Phase 2/3 will hook their recompute here.
+}
+
+function removeStep3Asset(key) {
+  STATE.step3.selectedAssets = STATE.step3.selectedAssets.filter((k) => k !== key);
+  saveStep3Selection();
+  renderStep3AssetChips();
+  // Phase 2/3 will hook their recompute here.
 }
 
 /* -----------------------------------------------------------
@@ -594,7 +805,7 @@ function hideElement(id) {
 }
 function showError(message) {
   hideElement('loading-state');
-  hideElement('reference-section');
+  hideElement('app-shell');
   const wrapper = document.getElementById('error-state');
   const msg = document.getElementById('error-message');
   if (msg) msg.textContent = message;
