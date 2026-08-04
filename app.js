@@ -1040,6 +1040,11 @@ function initOptimizer() {
     floorInput.value = String(OPTIMIZER_STATE.floorPct);
     floorInput.addEventListener('input', () => {
       OPTIMIZER_STATE.floorPct = clampPct(parseFloat(floorInput.value), OPTIMIZER_STATE.floorPct);
+      // The floor doesn't change the simulated points — only which one wins and
+      // which rows clear it. If a run's config is otherwise unchanged, re-derive
+      // the winner/frontier instantly instead of forcing a re-run.
+      const lr = OPTIMIZER_STATE.lastRun;
+      if (lr && lr.signature === optimizerConfigSignature()) rederiveOptimizerResults();
       updateOptimizerPreview();
     });
     floorInput.addEventListener('blur', () => {
@@ -1309,6 +1314,15 @@ function updateOptimizerPreview() {
   }
 
   updateOptimizerRunState({ keys, hasSpending, count, exceeded, feasible });
+
+  // Hide displayed results once the config no longer matches the run that
+  // produced them (asset/step/sims/caps change). Floor changes re-derive in
+  // place, so they don't trip this.
+  const box = document.getElementById('optimizer-results');
+  if (box && !box.hidden && OPTIMIZER_STATE.lastRun &&
+      OPTIMIZER_STATE.lastRun.signature !== optimizerConfigSignature()) {
+    box.hidden = true;
+  }
 }
 
 function updateOptimizerRunState({ keys, hasSpending, count, exceeded, feasible }) {
@@ -1425,7 +1439,7 @@ function runOptimizer() {
         if (finished === target) {
           cleanup();
           const points = results.flat();
-          finishOptimizer(points, plan, floorPct, N, step, performance.now() - startedAt);
+          finishOptimizer(points, plan, floorPct, N, step, performance.now() - startedAt, keys);
         }
       } else if (m.type === 'optimize_error') {
         aborted = true;
@@ -1447,13 +1461,41 @@ function runOptimizer() {
   });
 }
 
-function finishOptimizer(points, plan, floorPct, N, step, elapsedMs) {
+function finishOptimizer(points, plan, floorPct, N, step, elapsedMs, keys) {
   OPTIMIZER_STATE.running = false;
   setOptimizerBusy(false);
   const res = computeOptimizerResults(points, floorPct);
-  OPTIMIZER_STATE.lastRun = { points, plan, floorPct, N, step, elapsedMs, results: res };
+  OPTIMIZER_STATE.lastRun = {
+    points, plan, floorPct, N, step, elapsedMs, keys, results: res,
+    signature: optimizerConfigSignature(),
+  };
   renderOptimizerResults(res, { plan, floorPct, N, step, elapsedMs, total: points.length });
   updateOptimizerPreview(); // restore run-button enabled state
+}
+
+// A fingerprint of everything that affects the *simulated* points (not the
+// floor). When the current controls no longer match a run's signature, the
+// displayed results are stale.
+function optimizerConfigSignature() {
+  return JSON.stringify({
+    keys: optimizerSelectedKeys(),
+    step: OPTIMIZER_STATE.step,
+    sims: OPTIMIZER_STATE.simsPerCandidate,
+    caps: OPTIMIZER_STATE.caps,
+  });
+}
+
+// Re-rank an existing run against the current floor without re-simulating.
+function rederiveOptimizerResults() {
+  const lr = OPTIMIZER_STATE.lastRun;
+  if (!lr) return;
+  const res = computeOptimizerResults(lr.points, OPTIMIZER_STATE.floorPct);
+  lr.results = res;
+  lr.floorPct = OPTIMIZER_STATE.floorPct;
+  renderOptimizerResults(res, {
+    plan: lr.plan, floorPct: OPTIMIZER_STATE.floorPct,
+    N: lr.N, step: lr.step, elapsedMs: lr.elapsedMs, total: lr.points.length,
+  });
 }
 
 // Identify the winning portfolio + the Pareto-efficient frontier, and tag every
@@ -1589,9 +1631,153 @@ function renderOptimizerResults(res, meta) {
       `</tr></thead><tbody>${rows}</tbody></table></div>`;
   }
 
-  const meta1 = `<p class="optimizer-meta field-note small">Ran <strong>${total.toLocaleString('en-US')}</strong> portfolios × ${N.toLocaleString('en-US')} sims in ${(elapsedMs / 1000).toFixed(1)}s · ${step}% weight grid${invalidCount ? ` · ${invalidCount} skipped (no data in period)` : ''}.</p>`;
+  // Actions: load the winner into the Simulator for a full-fidelity re-check,
+  // and export the full point set for external plotting.
+  const pick = best || closest;
+  const actions =
+    `<div class="optimizer-actions">` +
+      (pick ? `<button type="button" class="optimizer-btn" id="optimizer-load-sim">Load ${best ? 'best' : 'closest'} into Simulator</button>` : '') +
+      `<button type="button" class="optimizer-btn" id="optimizer-export-json">Export JSON</button>` +
+      `<button type="button" class="optimizer-btn" id="optimizer-export-csv">Export CSV</button>` +
+    `</div>`;
 
-  box.innerHTML = headline + table + meta1;
+  const meta1 = `<p class="optimizer-meta field-note small">Ran <strong>${total.toLocaleString('en-US')}</strong> portfolios × ${N.toLocaleString('en-US')} sims in ${(elapsedMs / 1000).toFixed(1)}s · ${step}% weight grid${invalidCount ? ` · ${invalidCount} skipped (no data in period)` : ''}. Success/CAGR are Monte-Carlo estimates at ${N.toLocaleString('en-US')} sims — re-check the winner in the Simulator at full sims.</p>`;
+
+  box.innerHTML = headline + actions + table + meta1;
+
+  const loadBtn = document.getElementById('optimizer-load-sim');
+  if (loadBtn && pick) loadBtn.addEventListener('click', () => loadAllocationIntoSimulator(pick.allocation));
+  const jsonBtn = document.getElementById('optimizer-export-json');
+  if (jsonBtn) jsonBtn.addEventListener('click', exportOptimizerJSON);
+  const csvBtn = document.getElementById('optimizer-export-csv');
+  if (csvBtn) csvBtn.addEventListener('click', exportOptimizerCSV);
+}
+
+/* ---- Data export + "load into Simulator" ---- */
+
+// Push an optimizer allocation into the Simulator's allocation rows and switch
+// to that tab so the user can re-validate the portfolio at full fidelity.
+function loadAllocationIntoSimulator(alloc) {
+  if (!Array.isArray(alloc) || alloc.length === 0) return;
+  INPUT_STATE.allocations = alloc.map((a) => ({ key: a.key, pct: a.pct }));
+  renderAllocationRows();
+  refreshAllDerived();
+  const simTab = document.getElementById('tab-btn-simulator');
+  if (simTab) simTab.click();
+  const allocSection = document.getElementById('alloc-rows');
+  if (allocSection) allocSection.scrollIntoView({ block: 'center' });
+}
+
+function optimizerRound(v, d) {
+  if (v == null || !Number.isFinite(v)) return null;
+  const f = Math.pow(10, d);
+  return Math.round(v * f) / f;
+}
+
+// One point → the export record (the data model in the plan).
+function optimizerPointExport(p) {
+  if (p.invalid) {
+    return { allocation: p.allocation, invalid: true, reason: p.reason || 'invalid' };
+  }
+  return {
+    allocation: p.allocation.map((a) => ({ key: a.key, pct: a.pct })),
+    success_rate_pct:        optimizerRound(p.success_rate_pct, 3),
+    cagr_real_mean:          optimizerRound(p.cagr_real_mean, 4),
+    cagr_real_median:        optimizerRound(p.cagr_real_median, 4),
+    ending_wealth_real:      p.ending_wealth_real == null ? null : Math.round(p.ending_wealth_real),
+    ending_wealth_real_mean: p.ending_wealth_real_mean == null ? null : Math.round(p.ending_wealth_real_mean),
+    meets_floor:  !!p.meets_floor,
+    on_frontier:  !!p.on_frontier,
+  };
+}
+
+function buildOptimizerExportDoc() {
+  const lr = OPTIMIZER_STATE.lastRun;
+  if (!lr) return null;
+  const plan = lr.plan;
+  const byKey = new Map(STATE.assets.map((a) => [a.key, a]));
+  const bucket1 = (plan.buckets && plan.buckets[0]) ? (plan.buckets[0].expense || 0) : 0;
+  return {
+    generated_at: new Date().toISOString(),
+    tool: 'Beyond the Noise — Portfolio Optimizer',
+    plan: {
+      initial_balance:  plan.initial_balance,
+      period_years:     plan.period_years,
+      current_age:      plan.current_age,
+      annual_spending:  bucket1,
+      distribution_strategy: plan.distribution_strategy,
+      inflation_adjust: plan.inflation_adjust,
+      historical_period: plan.historical_period === 'custom'
+        ? `custom ${plan.custom_start}-${plan.custom_end}`
+        : plan.historical_period,
+    },
+    settings: {
+      weight_step_pct:    lr.step,
+      success_floor_pct:  lr.floorPct,
+      sims_per_candidate: lr.N,
+    },
+    asset_universe: (lr.keys || []).map((k) => ({ key: k, name: (byKey.get(k) || {}).name || k })),
+    summary: {
+      total_candidates: lr.points.length,
+      valid:            lr.results.validCount,
+      invalid:          lr.results.invalidCount,
+      frontier_size:    lr.results.frontier.length,
+      best:    lr.results.best    ? optimizerPointExport(lr.results.best)    : null,
+      closest: lr.results.closest ? optimizerPointExport(lr.results.closest) : null,
+    },
+    points: lr.points.map(optimizerPointExport),
+  };
+}
+
+function buildOptimizerCSV() {
+  const lr = OPTIMIZER_STATE.lastRun;
+  if (!lr) return null;
+  const keys = lr.keys || [];
+  const header = [
+    ...keys.map((k) => `pct_${k}`),
+    'success_rate_pct', 'cagr_real_mean', 'cagr_real_median',
+    'ending_wealth_real', 'ending_wealth_real_mean', 'meets_floor', 'on_frontier',
+  ];
+  const lines = [header.join(',')];
+  for (const p of lr.points) {
+    if (p.invalid) continue; // omit candidates with no data in the period
+    const pctByKey = new Map(p.allocation.map((a) => [a.key, a.pct]));
+    const row = [
+      ...keys.map((k) => pctByKey.get(k) || 0),
+      optimizerRound(p.success_rate_pct, 3),
+      optimizerRound(p.cagr_real_mean, 4),
+      optimizerRound(p.cagr_real_median, 4),
+      p.ending_wealth_real == null ? '' : Math.round(p.ending_wealth_real),
+      p.ending_wealth_real_mean == null ? '' : Math.round(p.ending_wealth_real_mean),
+      p.meets_floor ? 1 : 0,
+      p.on_frontier ? 1 : 0,
+    ];
+    lines.push(row.join(','));
+  }
+  return lines.join('\n');
+}
+
+function downloadTextFile(filename, text, mime) {
+  const blob = new Blob([text], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 0);
+}
+
+function exportOptimizerJSON() {
+  const doc = buildOptimizerExportDoc();
+  if (!doc) return;
+  downloadTextFile('btn-optimizer-results.json', JSON.stringify(doc, null, 2), 'application/json');
+}
+
+function exportOptimizerCSV() {
+  const csv = buildOptimizerCSV();
+  if (!csv) return;
+  downloadTextFile('btn-optimizer-results.csv', csv, 'text/csv');
 }
 
 function statPill(label, value) {

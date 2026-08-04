@@ -2811,6 +2811,9 @@ em { font-style: italic; }
   .modal-overlay,
   .tab-nav,
   .step3-controls,
+  .optimizer-controls,
+  #optimizer-progress,
+  .optimizer-actions,
   .page-footer,
   .page-header__sub,
   #dev-headline,
@@ -3394,3 +3397,31 @@ em { font-style: italic; }
   vertical-align: 1px;
 }
 .optimizer-meta { margin-top: 12px; }
+
+/* Result actions (load into Simulator / export) */
+.optimizer-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 0 0 18px;
+}
+.optimizer-btn {
+  font-family: var(--font-sans);
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--navy);
+  background: transparent;
+  border: 1.4px solid var(--navy);
+  border-radius: 3px;
+  padding: 7px 14px;
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease;
+}
+.optimizer-btn:hover {
+  background: var(--navy);
+  color: var(--paper);
+}
+.optimizer-btn:focus-visible {
+  outline: 2px solid var(--navy);
+  outline-offset: 2px;
+}
