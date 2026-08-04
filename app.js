@@ -185,8 +185,10 @@ const QUALITY_INFO = {
    ----------------------------------------------------------- */
 
 // Curated default asset set per Step 3 spec §3.2.
+// Uses S&P 500 (not Total US Market) as the large-cap-blend anchor and adds
+// Large Cap Value so the value tilt is present out of the box.
 const STEP3_DEFAULT_ASSETS = [
-  'total_market_us', 'mid_cap_blend', 'small_cap_blend',
+  'sp500', 'large_cap_value', 'mid_cap_blend', 'small_cap_blend',
   'intl_developed', 'emerging_markets',
   'total_bond', 'lt_treasury', 'tips',
   'reit', 'gold', 'st_tbills',
@@ -1082,6 +1084,56 @@ function optimizerSelectedKeys() {
     .sort((a, b) => (orderIndex.get(a) ?? 0) - (orderIndex.get(b) ?? 0));
 }
 
+/* ---- Data-coverage gating ----
+   The optimizer simulates every candidate over the SAME window — the Simulator
+   plan's historical period. If a portfolio held a late-starting asset, the
+   engine would intersect the year pool down to that asset's first year, so
+   different candidates would be judged over different histories — an unfair
+   frontier. So the grid only includes assets with FULL data over the plan
+   period; late-starting ones are surfaced separately and left out of the grid.
+   (The correlation matrix and periodic table intentionally still show partial-
+   coverage assets — only the optimizer needs a level playing field.) */
+
+// [start, end] of the plan's historical period (what the optimizer runs over).
+function optimizerPlanPeriodRange(plan) {
+  if (plan.historical_period === 'custom') return [plan.custom_start, plan.custom_end];
+  const p = PERIOD_LABELS[plan.historical_period];
+  return p ? [p.start, p.end] : [null, null];
+}
+
+// True if `key` has a non-null return for every year in [start, end].
+function optimizerAssetCoversPeriod(key, start, end) {
+  if (start == null || end == null) return true;
+  for (const row of STATE.data.annual_returns) {
+    if (row.year < start || row.year > end) continue;
+    if (row[key] == null) return false;
+  }
+  return true;
+}
+
+// First year `key` has data — used to explain why an asset was excluded.
+function optimizerAssetFirstYear(key) {
+  let first = null;
+  for (const row of STATE.data.annual_returns) {
+    if (row[key] != null && (first == null || row.year < first)) first = row.year;
+  }
+  return first;
+}
+
+// Partition the selected assets into { covered, excluded } for the current plan
+// period. `covered` (full history) drives the grid; `excluded` is reported.
+function optimizerGridPartition() {
+  const keys = optimizerSelectedKeys();
+  const { plan } = getSimulatorPlanForOptimizer();
+  const [start, end] = optimizerPlanPeriodRange(plan);
+  const covered = [], excluded = [];
+  for (const k of keys) {
+    if (optimizerAssetCoversPeriod(k, start, end)) covered.push(k);
+    else excluded.push(k);
+  }
+  return { covered, excluded, start, end };
+}
+
 // Snapshot the Simulator tab's current plan (everything except allocations),
 // matching the shape runSimulationFromInputs builds for the worker.
 function getSimulatorPlanForOptimizer() {
@@ -1152,25 +1204,54 @@ function renderOptimizerPlan() {
     parts.map((p) => `<span class="optimizer-plan__chip">${p}</span>`).join('');
 }
 
+// Surface any selected assets left out of the grid for lack of full history.
+function renderOptimizerExcludedNote(excluded, start, byKey) {
+  const note = document.getElementById('optimizer-excluded-note');
+  if (!note) return;
+  if (!excluded || excluded.length === 0 || start == null) {
+    note.hidden = true;
+    note.innerHTML = '';
+    return;
+  }
+  const items = excluded.map((k) => {
+    const name = (byKey.get(k) || {}).name || k;
+    const fy = optimizerAssetFirstYear(k);
+    return `${escapeHtml(name)}${fy ? ` (data from ${fy})` : ''}`;
+  }).join(', ');
+  note.hidden = false;
+  note.innerHTML =
+    `<strong>Left out of the grid</strong> — no data back to ${start} (your Simulator plan's period): ${items}. ` +
+    `Every candidate is scored over the same window, so a shorter-history asset can't be mixed in fairly. ` +
+    `To include one, set the Simulator plan to a period starting at or after its first year (e.g. a custom range).`;
+}
+
 // Build the per-asset min/max rows, preserving caps for still-selected assets.
+// Only assets with full data over the plan period get a row (see coverage note);
+// late-starting ones are listed separately in the excluded note.
 function renderOptimizerCaps() {
   const wrap = document.getElementById('optimizer-caps-rows');
   if (!wrap) return;
-  const keys = optimizerSelectedKeys();
+  const selected = optimizerSelectedKeys();
+  const { covered, excluded, start } = optimizerGridPartition();
   const byKey = new Map(STATE.assets.map((a) => [a.key, a]));
 
-  // Prune caps for assets no longer selected.
+  // Prune caps for assets no longer selected (keep caps for excluded-but-selected
+  // ones, in case a plan-period change brings them back into coverage).
   Object.keys(OPTIMIZER_STATE.caps).forEach((k) => {
-    if (!keys.includes(k)) delete OPTIMIZER_STATE.caps[k];
+    if (!selected.includes(k)) delete OPTIMIZER_STATE.caps[k];
   });
 
+  renderOptimizerExcludedNote(excluded, start, byKey);
+
   wrap.innerHTML = '';
-  if (keys.length < 2) {
-    wrap.innerHTML = `<p class="field-note small">Select at least 2 asset classes above to optimize.</p>`;
+  if (covered.length < 2) {
+    wrap.innerHTML = (selected.length >= 2 && excluded.length)
+      ? `<p class="field-note small">Fewer than 2 of your selected assets have full data back to ${start}. Add longer-history assets, or set the Simulator plan to a later start.</p>`
+      : `<p class="field-note small">Select at least 2 asset classes above to optimize.</p>`;
     return;
   }
 
-  keys.forEach((key) => {
+  covered.forEach((key) => {
     const asset = byKey.get(key);
     if (!asset) return;
     const cap = OPTIMIZER_STATE.caps[key] || {};
@@ -1278,7 +1359,8 @@ function updateOptimizerPreview() {
   const capsNote  = document.getElementById('optimizer-caps-note');
   if (!previewEl) return;
 
-  const keys = optimizerSelectedKeys();
+  // Only assets with full data over the plan period drive the grid.
+  const { covered: keys, excluded } = optimizerGridPartition();
   const { plan, hasSpending } = getSimulatorPlanForOptimizer();
   const step = OPTIMIZER_STATE.step;
 
@@ -1292,7 +1374,9 @@ function updateOptimizerPreview() {
 
   // Preview text
   if (keys.length < 2) {
-    previewEl.textContent = 'Select at least 2 asset classes above to optimize.';
+    previewEl.textContent = excluded.length
+      ? 'Need at least 2 assets with full data over your plan period.'
+      : 'Select at least 2 asset classes above to optimize.';
   } else if (!feasible) {
     previewEl.textContent = 'No portfolio fits these limits.';
   } else if (exceeded) {
@@ -1418,7 +1502,7 @@ function enumerateGridCompositions(keys, step, capCount) {
 /* ---- Run orchestration: worker pool over candidate slices ---- */
 function runOptimizer() {
   if (OPTIMIZER_STATE.running) return;
-  const keys = optimizerSelectedKeys();
+  const { covered: keys } = optimizerGridPartition(); // grid = full-coverage assets only
   const { plan, hasSpending } = getSimulatorPlanForOptimizer();
   if (!hasSpending || keys.length < 2) return;
 
@@ -1514,8 +1598,10 @@ function finishOptimizer(points, plan, floorPct, N, step, elapsedMs, keys) {
 // floor). When the current controls no longer match a run's signature, the
 // displayed results are stale.
 function optimizerConfigSignature() {
+  const { covered, start, end } = optimizerGridPartition();
   return JSON.stringify({
-    keys: optimizerSelectedKeys(),
+    keys: covered,          // only the assets that actually enter the grid
+    period: [start, end],   // plan-period change alters coverage → new run
     step: OPTIMIZER_STATE.step,
     sims: OPTIMIZER_STATE.simsPerCandidate,
     caps: OPTIMIZER_STATE.caps,

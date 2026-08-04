@@ -3273,6 +3273,21 @@ em { font-style: italic; }
   }
 }
 
+/* Assets left out of the grid for lack of full history over the plan period */
+.optimizer-excluded-note {
+  font-family: var(--font-sans);
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--soft);
+  background: rgba(181, 136, 32, 0.08);
+  border-left: 3px solid var(--gold);
+  border-radius: 0 3px 3px 0;
+  padding: 9px 12px;
+  margin: 10px 0 0;
+}
+.optimizer-excluded-note[hidden] { display: none; }
+.optimizer-excluded-note strong { color: var(--ink); font-weight: 600; }
+
 /* Run row: preview + button */
 .optimizer-run-row {
   display: flex;
