@@ -1331,16 +1331,69 @@ function bindOptimizerTwoStep() {
     OPTIMIZER_STATE.twostep.fiKey = fiSel.value;
     updateOptimizerStep1Preview();
   });
+
+  // Floor + sims live in two-step too (the free-mode controls are hidden here);
+  // both write the shared OPTIMIZER_STATE so the modes stay in sync.
+  const floorInput = document.getElementById('opt-step1-floor');
+  if (floorInput) {
+    floorInput.addEventListener('input', () => {
+      OPTIMIZER_STATE.floorPct = clampPct(parseFloat(floorInput.value), OPTIMIZER_STATE.floorPct);
+      // Floor doesn't change the simulated splits — re-pick the winner + redraw
+      // the floor line from the existing points, no re-run.
+      if (optimizerStep1Run) rederiveOptimizerStep1();
+      syncOptimizerFreeFloorInput();
+      updateOptimizerStep1Preview();
+    });
+    floorInput.addEventListener('blur', () => { floorInput.value = String(OPTIMIZER_STATE.floorPct); });
+  }
+
+  const simsSel = document.getElementById('opt-step1-sims');
+  if (simsSel && simsSel.options.length === 0) {
+    OPTIMIZER_SIMS_OPTIONS.forEach((n) => {
+      const opt = document.createElement('option');
+      opt.value = String(n);
+      opt.textContent = `${n.toLocaleString('en-US')} sims`;
+      if (n === OPTIMIZER_STATE.simsPerCandidate) opt.selected = true;
+      simsSel.appendChild(opt);
+    });
+    simsSel.addEventListener('change', () => {
+      OPTIMIZER_STATE.simsPerCandidate = parseInt(simsSel.value, 10) || 2000;
+      syncOptimizerFreeSimsInput();
+      updateOptimizerStep1Preview();
+      updateOptimizerStep2Preview();
+    });
+  }
+
   const runBtn = document.getElementById('opt-step1-run');
   if (runBtn) runBtn.addEventListener('click', runOptimizerStep1);
   const refineBtn = document.getElementById('opt-step1-refine');
   if (refineBtn) refineBtn.addEventListener('click', enterOptimizerStep2);
 }
 
+// Keep the (hidden) free-mode floor / sims inputs in step with two-step edits,
+// so switching back to Optimize-freely shows the same values.
+function syncOptimizerFreeFloorInput() {
+  const f = document.getElementById('optimizer-floor');
+  if (f) f.value = String(OPTIMIZER_STATE.floorPct);
+}
+function syncOptimizerFreeSimsInput() {
+  const s = document.getElementById('optimizer-sims');
+  if (s) s.value = String(OPTIMIZER_STATE.simsPerCandidate);
+}
+
 // Two-step renderer (called on mode switch / tab show / asset change).
 function renderOptimizerTwoStep() {
   populateOptimizerProxySelects();
+  // Sync the shared floor / sims into the two-step inputs.
+  const f = document.getElementById('opt-step1-floor');
+  if (f) f.value = String(OPTIMIZER_STATE.floorPct);
+  const s = document.getElementById('opt-step1-sims');
+  if (s) s.value = String(OPTIMIZER_STATE.simsPerCandidate);
   updateOptimizerStep1Preview();
+  // If Step 2 is open, refresh its buckets/preview (asset selection may have
+  // changed) without wiping any results it already shows.
+  const step2 = document.getElementById('opt-step2');
+  if (step2 && !step2.hidden) renderOptimizerStep2Controls();
   // Keep an existing frontier chart correctly sized when the tab re-shows.
   const two = document.getElementById('optimizer-twostep');
   if (optimizerStep1Chart && two && !two.hidden) optimizerStep1Chart.resize();
@@ -1485,8 +1538,18 @@ function finishOptimizerStep1(points, ctx) {
   const winner = res.best || res.closest || null;
   const winnerEquityPct = winner ? optimizerStep1EquityPct(winner, equityKey) : null;
 
+  const prevLocked = OPTIMIZER_STATE.twostep.lockedEquityPct;
   optimizerStep1Run = { points, plan, floorPct, N, equityKey, fiKey, start, end, winner, winnerEquityPct };
   OPTIMIZER_STATE.twostep.lockedEquityPct = winnerEquityPct;
+
+  // If Step 2 is already open and the winning split moved (e.g. the floor
+  // changed), refresh its buckets and drop the now-stale results.
+  const step2 = document.getElementById('opt-step2');
+  if (step2 && !step2.hidden && prevLocked !== winnerEquityPct) {
+    renderOptimizerStep2Controls();
+    const s2r = document.getElementById('opt-step2-results');
+    if (s2r) s2r.hidden = true;
+  }
 
   const results = document.getElementById('opt-step1-results');
   if (results) results.hidden = false;
@@ -1607,9 +1670,342 @@ function renderOptimizerStep1Table(run) {
   wrap.innerHTML = html;
 }
 
-// Step 2 entry point — implemented in c18j.
+// Re-pick the Step-1 winner + redraw from the existing points at the current
+// floor (no re-simulation) — used when the floor changes.
+function rederiveOptimizerStep1() {
+  const r = optimizerStep1Run;
+  if (!r) return;
+  finishOptimizerStep1(r.points, {
+    plan: r.plan, floorPct: OPTIMIZER_STATE.floorPct, N: r.N,
+    equityKey: r.equityKey, fiKey: r.fiKey, start: r.start, end: r.end, elapsedMs: 0,
+  });
+}
+
+/* ============================================================
+   Two-step mode — Step 2: refine within the locked split (c18j)
+   ============================================================ */
+
+const OPT_STEP2_STEP = 5;   // sub-class weight grid; 5% divides any 5%-multiple split
+
+// Partition the optimizer's covered, selected assets into stock / bond buckets.
+// Alternatives are excluded from two-step v1 and reported separately.
+function optimizerStep2Buckets() {
+  const { covered } = optimizerGridPartition();
+  const byKey = new Map(STATE.assets.map((a) => [a.key, a]));
+  const equityKeys = [], fiKeys = [], altKeys = [];
+  covered.forEach((k) => {
+    const g = (byKey.get(k) || {}).group;
+    if (OPT_EQUITY_GROUPS.includes(g)) equityKeys.push(k);
+    else if (g === OPT_FI_GROUP) fiKeys.push(k);
+    else altKeys.push(k);
+  });
+  return { equityKeys, fiKeys, altKeys };
+}
+
+// User clicked "Refine this split →" — reveal + build Step 2.
 function enterOptimizerStep2() {
-  /* implemented in c18j */
+  if (OPTIMIZER_STATE.twostep.lockedEquityPct == null) return;
+  const sec = document.getElementById('opt-step2');
+  if (!sec) return;
+  sec.hidden = false;
+  renderOptimizerStep2Shell();
+  renderOptimizerStep2Controls();
+  sec.scrollIntoView({ block: 'start' });
+}
+
+// Build the Step-2 inner shell once per entry, then bind its run button.
+function renderOptimizerStep2Shell() {
+  const sec = document.getElementById('opt-step2');
+  if (!sec) return;
+  sec.innerHTML =
+    `<div class="opt-step__head"><span class="opt-step__num">Step 2</span>` +
+    `<h3 class="opt-step__title">Refine within your split</h3></div>` +
+    `<div id="opt-step2-banner" class="opt-step2-banner" aria-live="polite"></div>` +
+    `<p class="opt-step__intro">Now hold that stock/bond split fixed and search for the best mix of ` +
+    `specific asset classes <strong>inside each bucket</strong>. Uses the asset classes you selected ` +
+    `above; weights move in ${OPT_STEP2_STEP}% steps so the buckets stay exactly on your split.</p>` +
+    `<div id="opt-step2-caps" class="opt-step2-caps"></div>` +
+    `<p id="opt-step2-warning" class="field-warning" hidden></p>` +
+    `<div class="optimizer-run-row">` +
+      `<div id="opt-step2-preview" class="optimizer-preview" aria-live="polite"></div>` +
+      `<button type="button" id="opt-step2-run" class="btn-primary" disabled>Refine within this split</button>` +
+    `</div>` +
+    `<div id="opt-step2-progress" class="dev-progress optimizer-progress" hidden>` +
+      `<p class="optimizer-progress__title">Running the model&hellip;</p>` +
+      `<div class="dev-progress__bar"><div class="dev-progress__fill" id="opt-step2-progress-fill"></div></div>` +
+      `<p class="dev-progress__label" id="opt-step2-progress-label">Simulating&hellip;</p>` +
+    `</div>` +
+    `<div id="opt-step2-results" class="optimizer-results" hidden></div>`;
+  const runBtn = document.getElementById('opt-step2-run');
+  if (runBtn) runBtn.addEventListener('click', runOptimizerStep2);
+}
+
+// Refresh the banner + bucketed caps + preview (does not touch results).
+function renderOptimizerStep2Controls() {
+  const E = OPTIMIZER_STATE.twostep.lockedEquityPct;
+  const banner = document.getElementById('opt-step2-banner');
+  const capsWrap = document.getElementById('opt-step2-caps');
+  if (E == null || !banner || !capsWrap) return;
+  const F = 100 - E;
+  const { equityKeys, fiKeys, altKeys } = optimizerStep2Buckets();
+  const byKey = new Map(STATE.assets.map((a) => [a.key, a]));
+
+  banner.innerHTML = `Refining within <strong>${E}% stocks / ${F}% bonds</strong> — locked from Step 1.`;
+
+  let html = '';
+  html += optimizerStep2BucketBlock('Stocks', E, equityKeys, byKey);
+  html += optimizerStep2BucketBlock('Bonds', F, fiKeys, byKey);
+  if (altKeys.length) {
+    html += `<p class="field-note small">Not included in two-step: ` +
+      `${altKeys.map((k) => escapeHtml((byKey.get(k) || {}).name || k)).join(', ')} (Alternatives). ` +
+      `Use “Optimize freely” to include them.</p>`;
+  }
+  capsWrap.innerHTML = html;
+  bindOptimizerStep2CapInputs();
+  updateOptimizerStep2Preview();
+}
+
+function optimizerStep2BucketBlock(label, bucketPct, keys, byKey) {
+  if (bucketPct === 0) return '';
+  if (keys.length === 0) {
+    return `<div class="opt-step2-bucket"><div class="opt-step2-bucket__head">${label} — ${bucketPct}% ` +
+      `<span class="field-note small">needs at least one ${label.toLowerCase()} asset class selected above</span>` +
+      `</div></div>`;
+  }
+  const rows = keys.map((key) => {
+    const asset = byKey.get(key) || {};
+    const cap = OPTIMIZER_STATE.caps[key] || {};
+    const minVal = cap.min == null ? '' : cap.min;
+    const maxVal = cap.max == null ? '' : cap.max;
+    return `<div class="optimizer-cap-row" data-group="${groupSlug(asset.group)}">` +
+      `<span class="optimizer-cap-row__name">${escapeHtml(asset.name || key)}</span>` +
+      `<span class="optimizer-cap-row__field"><label class="optimizer-cap-row__lab" for="opt2-min-${escapeHtml(key)}">min</label>` +
+        `<input id="opt2-min-${escapeHtml(key)}" class="num-input optimizer-cap-input opt2-cap" type="number" min="0" max="100" step="${OPT_STEP2_STEP}" inputmode="numeric" autocomplete="off" placeholder="0" value="${minVal}" data-key="${escapeHtml(key)}" data-bound="min" />` +
+        `<span class="optimizer-cap-row__pct">%</span></span>` +
+      `<span class="optimizer-cap-row__field"><label class="optimizer-cap-row__lab" for="opt2-max-${escapeHtml(key)}">max</label>` +
+        `<input id="opt2-max-${escapeHtml(key)}" class="num-input optimizer-cap-input opt2-cap" type="number" min="0" max="100" step="${OPT_STEP2_STEP}" inputmode="numeric" autocomplete="off" placeholder="100" value="${maxVal}" data-key="${escapeHtml(key)}" data-bound="max" />` +
+        `<span class="optimizer-cap-row__pct">%</span></span>` +
+    `</div>`;
+  }).join('');
+  return `<div class="opt-step2-bucket"><div class="opt-step2-bucket__head">${label} — must total ${bucketPct}%</div>${rows}</div>`;
+}
+
+function bindOptimizerStep2CapInputs() {
+  document.querySelectorAll('#opt-step2-caps .opt2-cap').forEach((input) => {
+    input.addEventListener('input', () => {
+      const key = input.dataset.key, bound = input.dataset.bound;
+      if (!OPTIMIZER_STATE.caps[key]) OPTIMIZER_STATE.caps[key] = { min: null, max: null };
+      const raw = input.value.trim();
+      OPTIMIZER_STATE.caps[key][bound] = raw === '' ? null : clampPct(parseFloat(raw), null);
+      updateOptimizerStep2Preview();
+    });
+  });
+}
+
+// Composition count for one bucket (targetPct=0 → the empty bucket, one way).
+function optimizerStep2BucketCount(keys, targetPct, cap) {
+  if (targetPct === 0) return { count: 1, feasible: true, exceeded: false };
+  if (keys.length === 0) return { count: 0, feasible: false, exceeded: false };
+  const { m, lo, hi } = optimizerUnitBounds(keys, OPT_STEP2_STEP, targetPct);
+  return countGridCompositions(lo, hi, m, cap);
+}
+
+// The full candidate set = equity compositions (sum E) × FI compositions (sum F).
+function optimizerStep2Candidates() {
+  const E = OPTIMIZER_STATE.twostep.lockedEquityPct;
+  if (E == null) return { candidates: [], eqKeys: [], fiKeys: [] };
+  const F = 100 - E;
+  const { equityKeys, fiKeys } = optimizerStep2Buckets();
+  const eqComps = E === 0 ? [[]] : enumerateGridCompositions(equityKeys, OPT_STEP2_STEP, OPTIMIZER_CANDIDATE_CAP, E);
+  const fiComps = F === 0 ? [[]] : enumerateGridCompositions(fiKeys, OPT_STEP2_STEP, OPTIMIZER_CANDIDATE_CAP, F);
+  const candidates = [];
+  for (const ec of eqComps) {
+    for (const fc of fiComps) {
+      candidates.push(ec.concat(fc));
+      if (candidates.length > OPTIMIZER_CANDIDATE_CAP) {
+        return { candidates, eqKeys: equityKeys, fiKeys, overflow: true };
+      }
+    }
+  }
+  return { candidates, eqKeys: equityKeys, fiKeys };
+}
+
+function updateOptimizerStep2Preview() {
+  const previewEl = document.getElementById('opt-step2-preview');
+  const warnEl = document.getElementById('opt-step2-warning');
+  const runBtn = document.getElementById('opt-step2-run');
+  if (!previewEl || !runBtn) return;
+
+  const E = OPTIMIZER_STATE.twostep.lockedEquityPct;
+  const F = E == null ? null : 100 - E;
+  const { plan, hasSpending } = getSimulatorPlanForOptimizer();
+  const { equityKeys, fiKeys } = optimizerStep2Buckets();
+
+  let warn = '', canRun = true, count = 0;
+  const eqCnt = optimizerStep2BucketCount(equityKeys, E || 0, OPTIMIZER_CANDIDATE_CAP);
+  const fiCnt = optimizerStep2BucketCount(fiKeys, F || 0, OPTIMIZER_CANDIDATE_CAP);
+
+  if (!hasSpending || E == null) { canRun = false; }
+  else if (E > 0 && equityKeys.length === 0) { canRun = false; warn = 'Select at least one stock asset class above to fill the stock bucket.'; }
+  else if (F > 0 && fiKeys.length === 0)     { canRun = false; warn = 'Select at least one bond asset class above to fill the bond bucket.'; }
+  else if (!eqCnt.feasible || !fiCnt.feasible) { canRun = false; warn = 'No mix fits these per-asset limits — loosen a min/max.'; }
+  else {
+    count = eqCnt.count * fiCnt.count;
+    if (eqCnt.exceeded || fiCnt.exceeded || count > OPTIMIZER_CANDIDATE_CAP) {
+      canRun = false;
+      warn = `Too many mixes to run at a ${OPT_STEP2_STEP}% grid. Refine fewer sub-classes, or add per-asset limits.`;
+    }
+  }
+
+  if (!hasSpending || E == null) {
+    previewEl.textContent = '';
+  } else if (count > 0 && canRun) {
+    const estMs = count * OPTIMIZER_STATE.simsPerCandidate * plan.period_years * OPTIMIZER_MS_PER_SIM_YEAR / OPTIMIZER_STATE.poolSize;
+    const estStr = estMs < 1000 ? '~1s' : `~${Math.round(estMs / 1000)}s`;
+    previewEl.innerHTML =
+      `<strong>${count.toLocaleString('en-US')}</strong> portfolio${count === 1 ? '' : 's'}` +
+      ` · <span class="optimizer-preview__est">${estStr} on ${OPTIMIZER_STATE.poolSize} core${OPTIMIZER_STATE.poolSize === 1 ? '' : 's'}</span>`;
+  } else {
+    previewEl.textContent = '';
+  }
+
+  if (warnEl) { warnEl.hidden = warn === ''; warnEl.textContent = warn; }
+  runBtn.disabled = OPTIMIZER_STATE.twostep.running || !canRun || count < 1;
+}
+
+function setOptimizerStep2Busy(busy) {
+  const btn = document.getElementById('opt-step2-run');
+  const prog = document.getElementById('opt-step2-progress');
+  if (btn)  { btn.disabled = busy; btn.textContent = busy ? 'Refining…' : 'Refine within this split'; }
+  if (prog) prog.hidden = !busy;
+}
+
+function optimizerStep2Progress(done, total) {
+  const fill = document.getElementById('opt-step2-progress-fill');
+  const label = document.getElementById('opt-step2-progress-label');
+  if (fill) fill.style.width = `${total ? Math.min(100, (done / total) * 100) : 0}%`;
+  if (label) label.textContent =
+    `Simulating every portfolio in your browser — ${done.toLocaleString('en-US')} / ${total.toLocaleString('en-US')}`;
+}
+
+function runOptimizerStep2() {
+  if (OPTIMIZER_STATE.running || OPTIMIZER_STATE.twostep.running) return;
+  const { plan, hasSpending } = getSimulatorPlanForOptimizer();
+  if (!hasSpending) return;
+  const E = OPTIMIZER_STATE.twostep.lockedEquityPct;
+  if (E == null) return;
+  const [start, end] = optimizerPlanPeriodRange(plan);
+  const { candidates, eqKeys, fiKeys, overflow } = optimizerStep2Candidates();
+  if (overflow || candidates.length === 0 || candidates.length > OPTIMIZER_CANDIDATE_CAP) return;
+
+  const floorPct = OPTIMIZER_STATE.floorPct;
+  const N = OPTIMIZER_STATE.simsPerCandidate;
+  const total = candidates.length;
+
+  OPTIMIZER_STATE.twostep.running = true;
+  setOptimizerStep2Busy(true);
+  optimizerStep2Progress(0, total);
+  const startedAt = performance.now();
+
+  runOptimizeBatch(candidates, plan, N, { onProgress: optimizerStep2Progress })
+    .then((points) => {
+      OPTIMIZER_STATE.twostep.running = false;
+      setOptimizerStep2Busy(false);
+      finishOptimizerStep2(points, { plan, floorPct, N, keys: [...eqKeys, ...fiKeys],
+                                     start, end, elapsedMs: performance.now() - startedAt, E });
+    })
+    .catch((err) => {
+      OPTIMIZER_STATE.twostep.running = false;
+      setOptimizerStep2Busy(false);
+      const warnEl = document.getElementById('opt-step2-warning');
+      if (warnEl) { warnEl.hidden = false; warnEl.textContent = (err && err.message) || 'The engine reported an error.'; }
+    });
+}
+
+function finishOptimizerStep2(points, ctx) {
+  const { plan, floorPct, N, keys, elapsedMs, E } = ctx;
+  const res = computeOptimizerResults(points, floorPct);
+  // Park this as the "last run" so the shared JSON/CSV export path exports it.
+  OPTIMIZER_STATE.lastRun = {
+    points, plan, floorPct, N, step: OPT_STEP2_STEP, elapsedMs, keys, results: res,
+    signature: optimizerConfigSignature(),
+  };
+  renderOptimizerStep2Results(res, { floorPct, N, step: OPT_STEP2_STEP, elapsedMs, total: points.length, E });
+}
+
+function renderOptimizerStep2Results(res, meta) {
+  const box = document.getElementById('opt-step2-results');
+  if (!box) return;
+  box.hidden = false;
+  const { best, closest, frontier, invalidCount } = res;
+  const { floorPct, N, step, elapsedMs, total, E } = meta;
+  const F = 100 - E;
+  const pick = best || closest;
+
+  let headline;
+  if (best) {
+    headline =
+      `<div class="optimizer-best">` +
+        `<p class="optimizer-best__label">Best ${E}/${F} portfolio clearing ${optimizerFmtPct(floorPct, 0)} success</p>` +
+        `<p class="optimizer-best__alloc">${optimizerAllocationSummary(best.allocation)}</p>` +
+        `<div class="optimizer-best__stats">` +
+          statPill('Success', optimizerFmtPct(best.success_rate_pct)) +
+          statPill('Real median CAGR', optimizerFmtPct(best.cagr_real_median, 2)) +
+          statPill('Median ending (real)', formatCurrency(Math.round(best.ending_wealth_real))) +
+        `</div>` +
+      `</div>`;
+  } else if (closest) {
+    headline =
+      `<div class="optimizer-best optimizer-best--miss">` +
+        `<p class="optimizer-best__label">No ${E}/${F} mix cleared ${optimizerFmtPct(floorPct, 0)} success</p>` +
+        `<p class="optimizer-best__alloc">Closest: ${optimizerAllocationSummary(closest.allocation)}</p>` +
+        `<div class="optimizer-best__stats">` +
+          statPill('Best success', optimizerFmtPct(closest.success_rate_pct)) +
+          statPill('Real median CAGR', optimizerFmtPct(closest.cagr_real_median, 2)) +
+          statPill('Median ending (real)', formatCurrency(Math.round(closest.ending_wealth_real))) +
+        `</div>` +
+        `<p class="field-note small">The split is locked — try a lower floor, or go back and pick a different split.</p>` +
+      `</div>`;
+  } else {
+    headline = `<div class="optimizer-best optimizer-best--miss"><p class="optimizer-best__label">No valid portfolios in this split.</p></div>`;
+  }
+
+  let table = '';
+  if (frontier.length) {
+    const rows = frontier.map((p) => {
+      const isBest = p === best;
+      return `<tr class="${isBest ? 'is-best' : ''}${p.meets_floor ? '' : ' is-belowfloor'}">` +
+        `<td class="optimizer-rt__alloc">${optimizerAllocationSummary(p.allocation)}${isBest ? ' <span class="optimizer-tag">best</span>' : ''}</td>` +
+        `<td class="num">${optimizerFmtPct(p.success_rate_pct)}</td>` +
+        `<td class="num">${optimizerFmtPct(p.cagr_real_mean, 2)}</td>` +
+        `<td class="num">${optimizerFmtPct(p.cagr_real_median, 2)}</td>` +
+        `<td class="num">${formatCurrency(Math.round(p.ending_wealth_real))}</td>` +
+      `</tr>`;
+    }).join('');
+    table =
+      `<div class="optimizer-rt-head">Efficient frontier <span class="field-note small">— ${frontier.length} non-dominated portfolio${frontier.length === 1 ? '' : 's'} within your locked split. Rows below your floor are dimmed.</span></div>` +
+      `<div class="table-wrap"><table class="optimizer-rt"><thead><tr>` +
+        `<th>Allocation</th><th class="num">Success</th><th class="num">Avg CAGR (real)</th><th class="num">Median CAGR (real)</th><th class="num">Median ending (real)</th>` +
+      `</tr></thead><tbody>${rows}</tbody></table></div>`;
+  }
+
+  const actions =
+    `<div class="optimizer-actions">` +
+      (pick ? `<button type="button" class="optimizer-btn" id="opt-step2-load-sim">Load ${best ? 'best' : 'closest'} into Simulator</button>` : '') +
+      `<button type="button" class="optimizer-btn" id="opt-step2-export-json">Export JSON</button>` +
+      `<button type="button" class="optimizer-btn" id="opt-step2-export-csv">Export CSV</button>` +
+    `</div>`;
+
+  const meta1 = `<p class="optimizer-meta field-note small">Ran <strong>${total.toLocaleString('en-US')}</strong> portfolios × ${N.toLocaleString('en-US')} sims in ${(elapsedMs / 1000).toFixed(1)}s · ${step}% sub-class grid, split locked at ${E}/${F}${invalidCount ? ` · ${invalidCount} skipped` : ''}. Success/CAGR are Monte-Carlo estimates — re-check the winner in the Simulator at full sims.</p>`;
+
+  box.innerHTML = headline + actions + table + meta1;
+
+  const loadBtn = document.getElementById('opt-step2-load-sim');
+  if (loadBtn && pick) loadBtn.addEventListener('click', () => loadAllocationIntoSimulator(pick.allocation));
+  const jsonBtn = document.getElementById('opt-step2-export-json');
+  if (jsonBtn) jsonBtn.addEventListener('click', exportOptimizerJSON);
+  const csvBtn = document.getElementById('opt-step2-export-csv');
+  if (csvBtn) csvBtn.addEventListener('click', exportOptimizerCSV);
 }
 
 // Rebuild the parts of Tool 4 that depend on the shared selection or the

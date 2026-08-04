@@ -992,6 +992,20 @@
                 is the <strong>most stock you can hold while still clearing your success floor</strong>.
               </p>
 
+              <div class="opt-step1-controls">
+                <div class="optimizer-field">
+                  <label class="field-label" for="opt-step1-floor">Minimum success rate</label>
+                  <div class="optimizer-floor-wrap">
+                    <input id="opt-step1-floor" class="num-input" type="number" min="0" max="100" step="1" inputmode="numeric" autocomplete="off" />
+                    <span class="optimizer-floor-pct">%</span>
+                  </div>
+                </div>
+                <div class="optimizer-field">
+                  <label class="field-label" for="opt-step1-sims">Simulations per split</label>
+                  <select id="opt-step1-sims" class="select"></select>
+                </div>
+              </div>
+
               <div class="opt-step1-proxies">
                 <div class="optimizer-field">
                   <label class="field-label" for="opt-step1-equity">Stocks represented by</label>
@@ -1003,7 +1017,7 @@
                   <select id="opt-step1-fi" class="select"></select>
                 </div>
               </div>
-              <p class="field-note small">Uses your Simulator plan, your success floor, and your sims-per-portfolio setting from the Optimize-freely controls.</p>
+              <p class="field-note small">Holds your Simulator plan fixed and varies only the stock/bond split. The success floor and sims apply to Step 2 as well.</p>
 
               <div class="optimizer-run-row">
                 <div id="opt-step1-preview" class="optimizer-preview" aria-live="polite"></div>

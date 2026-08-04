@@ -3578,6 +3578,15 @@ em { font-style: italic; }
 }
 .opt-step__intro strong { color: var(--ink); }
 
+/* ---- Step 1: floor + sims controls ---- */
+.opt-step1-controls {
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+.opt-step1-controls .optimizer-field { flex: 0 1 200px; }
+
 /* ---- Step 1: proxy pickers ---- */
 .opt-step1-proxies {
   display: flex;
@@ -3648,3 +3657,26 @@ em { font-style: italic; }
   flex: 1 1 320px;
 }
 .opt-step1-winner-note strong { color: var(--navy); }
+
+/* ---- Step 2: locked-split banner + bucketed caps ---- */
+.opt-step2-banner {
+  font-size: 14px;
+  color: var(--ink);
+  padding: 9px 12px;
+  margin-bottom: 14px;
+  background: rgba(31, 61, 107, 0.06);
+  border-left: 3px solid var(--navy);
+  border-radius: 0 4px 4px 0;
+}
+.opt-step2-banner strong { color: var(--navy); }
+.opt-step2-caps { margin: 4px 0 6px; }
+.opt-step2-bucket { margin-bottom: 14px; }
+.opt-step2-bucket__head {
+  font-family: var(--font-sans);
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--ink);
+  margin-bottom: 8px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid rgba(31, 61, 107, 0.12);
+}
