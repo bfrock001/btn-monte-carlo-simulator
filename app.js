@@ -199,6 +199,7 @@ function initStep3() {
   bindTabs();
   bindStep3PeriodToggle();
   initStep3AssetSelection();
+  initOptimizer();
   refreshStep3Tools();
 }
 
@@ -221,6 +222,10 @@ function bindTabs() {
         panel.hidden = !isActive;
         panel.classList.toggle('is-active', isActive);
       });
+      // The optimizer mirrors the Simulator's current plan (balance, spending,
+      // strategy…), which may have changed while that tab was open — refresh it
+      // each time the Data tab is shown.
+      if (target === 'data') renderOptimizerControls();
     });
   });
 }
@@ -454,6 +459,7 @@ function removeStep3Asset(key) {
 function refreshStep3Tools() {
   renderCorrelationMatrix();
   renderPeriodicTable();
+  renderOptimizerControls();
 }
 
 /* -----------------------------------------------------------
@@ -948,6 +954,364 @@ function renderPeriodicTable() {
   if (scroll.scrollWidth > scroll.clientWidth) {
     scroll.scrollLeft = scroll.scrollWidth;
   }
+}
+
+/* ============================================================
+   Tool 4 · Portfolio Optimizer (success-adjusted efficient frontier)
+   ------------------------------------------------------------
+   Sweeps a constrained grid of allocations over the shared selected
+   assets, holding the Simulator tab's plan (balance, horizon, spending,
+   income, strategy, period) fixed, and — in the engine phase — runs each
+   candidate through the same Monte Carlo worker to find the portfolio with
+   the highest real median CAGR that still clears the user's success floor.
+
+   Phase 1 (this block): controls, constrained-grid enumeration/count with
+   per-asset min/max caps, live candidate-count + runtime preview, and the
+   "no spending plan" gate. The engine + results land in Phase 2/3.
+   ============================================================ */
+
+const OPTIMIZER_STEP_OPTIONS  = [5, 10, 20, 25];
+const OPTIMIZER_SIMS_OPTIONS  = [1000, 2000, 5000];
+const OPTIMIZER_CANDIDATE_CAP  = 2000;   // hard block above this many portfolios
+const OPTIMIZER_CANDIDATE_WARN = 800;    // soft warning above this many
+// Rough per-sim-year cost (ms) used only for the runtime estimate. Tuned
+// against the worker's reported runtime_ms in Phase 2; intentionally a little
+// conservative so the estimate over- rather than under-promises.
+const OPTIMIZER_MS_PER_SIM_YEAR = 0.0009;
+// Flipped true in Phase 2 once the worker "optimize" path + orchestrator exist.
+const OPTIMIZER_ENGINE_READY = false;
+
+const OPTIMIZER_STRATEGY_LABELS = {
+  none:             'Fixed expense schedule',
+  constant_dollar:  'Constant dollar',
+  forgo_inflation:  'Forgo inflation in down years',
+  actual_spending:  'Actual spending decline',
+  guyton_klinger:   'Guyton-Klinger guardrails',
+  vanguard_dynamic: 'Vanguard dynamic spending',
+};
+
+const OPTIMIZER_STATE = {
+  step: 10,
+  floorPct: 92,
+  simsPerCandidate: 2000,
+  caps: {},        // key -> { min: number|null, max: number|null } in whole %
+  lastCount: 0,    // candidate count from the most recent preview
+  poolSize: Math.max(1, Math.min(navigator.hardwareConcurrency || 4, 4)),
+};
+
+// One-time setup: build the static selects, seed defaults, bind events.
+function initOptimizer() {
+  const stepSel = document.getElementById('optimizer-step');
+  if (stepSel && stepSel.options.length === 0) {
+    OPTIMIZER_STEP_OPTIONS.forEach((s) => {
+      const opt = document.createElement('option');
+      opt.value = String(s);
+      opt.textContent = `${s}%`;
+      if (s === OPTIMIZER_STATE.step) opt.selected = true;
+      stepSel.appendChild(opt);
+    });
+    stepSel.addEventListener('change', () => {
+      OPTIMIZER_STATE.step = parseInt(stepSel.value, 10) || 10;
+      updateOptimizerPreview();
+    });
+  }
+
+  const simsSel = document.getElementById('optimizer-sims');
+  if (simsSel && simsSel.options.length === 0) {
+    OPTIMIZER_SIMS_OPTIONS.forEach((n) => {
+      const opt = document.createElement('option');
+      opt.value = String(n);
+      opt.textContent = `${n.toLocaleString('en-US')} sims`;
+      if (n === OPTIMIZER_STATE.simsPerCandidate) opt.selected = true;
+      simsSel.appendChild(opt);
+    });
+    simsSel.addEventListener('change', () => {
+      OPTIMIZER_STATE.simsPerCandidate = parseInt(simsSel.value, 10) || 2000;
+      updateOptimizerPreview();
+    });
+  }
+
+  const floorInput = document.getElementById('optimizer-floor');
+  if (floorInput) {
+    floorInput.value = String(OPTIMIZER_STATE.floorPct);
+    floorInput.addEventListener('input', () => {
+      OPTIMIZER_STATE.floorPct = clampPct(parseFloat(floorInput.value), OPTIMIZER_STATE.floorPct);
+      updateOptimizerPreview();
+    });
+    floorInput.addEventListener('blur', () => {
+      floorInput.value = String(OPTIMIZER_STATE.floorPct);
+    });
+  }
+
+  renderOptimizerControls();
+}
+
+// Rebuild the parts of Tool 4 that depend on the shared selection or the
+// Simulator plan. Called from refreshStep3Tools (asset add/remove, range change)
+// and when the Data tab becomes visible (plan may have changed on the Simulator).
+function renderOptimizerControls() {
+  renderOptimizerPlan();
+  renderOptimizerCaps();
+  updateOptimizerPreview();
+}
+
+// clamp helper: returns a number in [0,100], or the fallback for NaN/blank.
+function clampPct(v, fallback) {
+  if (v == null || Number.isNaN(v)) return fallback;
+  return Math.min(100, Math.max(0, v));
+}
+
+// Selected assets ordered by the master asset order (stable UI).
+function optimizerSelectedKeys() {
+  const orderIndex = new Map();
+  STATE.assets.forEach((a, i) => orderIndex.set(a.key, i));
+  return [...STATE.step3.selectedAssets]
+    .filter((k) => orderIndex.has(k))
+    .sort((a, b) => (orderIndex.get(a) ?? 0) - (orderIndex.get(b) ?? 0));
+}
+
+// Snapshot the Simulator tab's current plan (everything except allocations),
+// matching the shape runSimulationFromInputs builds for the worker.
+function getSimulatorPlanForOptimizer() {
+  const buckets = Array.isArray(INPUT_STATE.buckets) ? INPUT_STATE.buckets : [];
+  const bucket1Annual = buckets.length ? (buckets[0].expense || 0) : 0;
+  const hasSpending = bucket1Annual > 0;
+  const plan = {
+    period_years:        INPUT_STATE.period_years,
+    current_age:         INPUT_STATE.current_age,
+    initial_balance:     INPUT_STATE.initial_balance,
+    historical_period:   INPUT_STATE.historical_period,
+    custom_start:        INPUT_STATE.custom_start,
+    custom_end:          INPUT_STATE.custom_end,
+    sequence_of_returns: INPUT_STATE.sequence_of_returns,
+    sor_force_2008:      INPUT_STATE.sor_force_2008,
+    inflation_adjust:    INPUT_STATE.inflation_adjust,
+    expense_mode:        'annual',
+    ss:      { ...INPUT_STATE.ss },
+    pension: { ...INPUT_STATE.pension },
+    annuity: { ...INPUT_STATE.annuity },
+    buckets: buckets.map((b) => ({ expense: b.expense || 0 })),
+    distribution_strategy:     INPUT_STATE.distribution_strategy,
+    minimum_withdrawal_annual: INPUT_STATE.minimum_withdrawal_annual,
+    strategy_params:           { ...INPUT_STATE.strategy_params },
+  };
+  return { plan, hasSpending, bucket1Annual };
+}
+
+function optimizerPeriodLabel(plan) {
+  if (plan.historical_period === 'custom') {
+    return `Custom (${plan.custom_start}–${plan.custom_end})`;
+  }
+  const p = PERIOD_LABELS[plan.historical_period];
+  return p ? p.name : plan.historical_period;
+}
+
+// Plan summary chip, or the spending gate when no expense is configured.
+function renderOptimizerPlan() {
+  const box = document.getElementById('optimizer-plan');
+  const controls = document.getElementById('optimizer-controls');
+  if (!box) return;
+  const { plan, hasSpending, bucket1Annual } = getSimulatorPlanForOptimizer();
+
+  if (!hasSpending) {
+    box.className = 'optimizer-plan optimizer-plan--gate';
+    box.innerHTML =
+      `<strong>No spending set.</strong> The optimizer compares how long each portfolio ` +
+      `lasts, so it needs an annual expense. Open the <strong>Simulator</strong> tab and enter ` +
+      `an expense (Bucket 1), then come back.`;
+    if (controls) controls.hidden = true;
+    return;
+  }
+
+  if (controls) controls.hidden = false;
+  box.className = 'optimizer-plan';
+  const startAge = plan.current_age;
+  const endAge   = plan.current_age + plan.period_years;
+  const strategy = OPTIMIZER_STRATEGY_LABELS[plan.distribution_strategy] || plan.distribution_strategy;
+  const parts = [
+    `<strong>${formatCurrency(plan.initial_balance)}</strong> start`,
+    `${plan.period_years} yrs (age ${startAge}→${endAge})`,
+    `<strong>${formatCurrency(bucket1Annual)}/yr</strong> spending`,
+    strategy,
+    optimizerPeriodLabel(plan),
+  ];
+  box.innerHTML =
+    `<span class="optimizer-plan__label">Using your Simulator plan:</span> ` +
+    parts.map((p) => `<span class="optimizer-plan__chip">${p}</span>`).join('');
+}
+
+// Build the per-asset min/max rows, preserving caps for still-selected assets.
+function renderOptimizerCaps() {
+  const wrap = document.getElementById('optimizer-caps-rows');
+  if (!wrap) return;
+  const keys = optimizerSelectedKeys();
+  const byKey = new Map(STATE.assets.map((a) => [a.key, a]));
+
+  // Prune caps for assets no longer selected.
+  Object.keys(OPTIMIZER_STATE.caps).forEach((k) => {
+    if (!keys.includes(k)) delete OPTIMIZER_STATE.caps[k];
+  });
+
+  wrap.innerHTML = '';
+  if (keys.length < 2) {
+    wrap.innerHTML = `<p class="field-note small">Select at least 2 asset classes above to optimize.</p>`;
+    return;
+  }
+
+  keys.forEach((key) => {
+    const asset = byKey.get(key);
+    if (!asset) return;
+    const cap = OPTIMIZER_STATE.caps[key] || {};
+    const minVal = cap.min == null ? '' : cap.min;
+    const maxVal = cap.max == null ? '' : cap.max;
+    const row = document.createElement('div');
+    row.className = 'optimizer-cap-row';
+    row.dataset.group = groupSlug(asset.group);
+    row.innerHTML =
+      `<span class="optimizer-cap-row__name">${escapeHtml(asset.name)}</span>` +
+      `<span class="optimizer-cap-row__field">` +
+        `<label class="optimizer-cap-row__lab" for="opt-min-${escapeHtml(key)}">min</label>` +
+        `<input id="opt-min-${escapeHtml(key)}" class="num-input optimizer-cap-input" type="number" ` +
+          `min="0" max="100" step="${OPTIMIZER_STATE.step}" inputmode="numeric" autocomplete="off" ` +
+          `placeholder="0" value="${minVal}" data-key="${escapeHtml(key)}" data-bound="min" />` +
+        `<span class="optimizer-cap-row__pct">%</span>` +
+      `</span>` +
+      `<span class="optimizer-cap-row__field">` +
+        `<label class="optimizer-cap-row__lab" for="opt-max-${escapeHtml(key)}">max</label>` +
+        `<input id="opt-max-${escapeHtml(key)}" class="num-input optimizer-cap-input" type="number" ` +
+          `min="0" max="100" step="${OPTIMIZER_STATE.step}" inputmode="numeric" autocomplete="off" ` +
+          `placeholder="100" value="${maxVal}" data-key="${escapeHtml(key)}" data-bound="max" />` +
+        `<span class="optimizer-cap-row__pct">%</span>` +
+      `</span>`;
+    wrap.appendChild(row);
+  });
+
+  wrap.querySelectorAll('.optimizer-cap-input').forEach((input) => {
+    input.addEventListener('input', () => {
+      const key = input.dataset.key;
+      const bound = input.dataset.bound;
+      if (!OPTIMIZER_STATE.caps[key]) OPTIMIZER_STATE.caps[key] = { min: null, max: null };
+      const raw = input.value.trim();
+      OPTIMIZER_STATE.caps[key][bound] = raw === '' ? null : clampPct(parseFloat(raw), null);
+      updateOptimizerPreview();
+    });
+  });
+}
+
+/* ---- Constrained-grid enumeration ----
+   Weights are multiples of `step` summing to 100. In units of `step` the total
+   is m = 100/step, and each asset i is bounded to [lo_i, hi_i] units derived
+   from its min/max caps (min rounds up, max rounds down to the step grid). */
+
+function optimizerUnitBounds(keys, step) {
+  const m = Math.round(100 / step);
+  const lo = [], hi = [];
+  for (const k of keys) {
+    const cap = OPTIMIZER_STATE.caps[k] || {};
+    const minPct = clampPct(cap.min, 0);
+    const maxPct = clampPct(cap.max, 100);
+    lo.push(Math.ceil(minPct / step - 1e-9));
+    hi.push(Math.floor(maxPct / step + 1e-9));
+  }
+  return { m, lo, hi };
+}
+
+// Count compositions with perfect feasibility pruning, bailing out once the
+// count exceeds `cap` (we block above the cap anyway, so the exact value past
+// it is irrelevant). Returns { count, exceeded, feasible }.
+function countGridCompositions(lo, hi, m, cap) {
+  const k = lo.length;
+  for (let i = 0; i < k; i++) if (lo[i] > hi[i]) return { count: 0, exceeded: false, feasible: false };
+  const sufLo = new Array(k + 1).fill(0);
+  const sufHi = new Array(k + 1).fill(0);
+  for (let i = k - 1; i >= 0; i--) {
+    sufLo[i] = sufLo[i + 1] + lo[i];
+    sufHi[i] = sufHi[i + 1] + hi[i];
+  }
+  if (sufLo[0] > m || sufHi[0] < m) return { count: 0, exceeded: false, feasible: false };
+
+  let count = 0;
+  let bailed = false;
+  function rec(i, remaining) {
+    if (bailed) return;
+    if (i === k) { if (remaining === 0) count++; return; }
+    const lowU  = Math.max(lo[i], remaining - sufHi[i + 1]);
+    const highU = Math.min(hi[i], remaining - sufLo[i + 1]);
+    for (let u = lowU; u <= highU; u++) {
+      rec(i + 1, remaining - u);
+      if (count > cap) { bailed = true; return; }
+    }
+  }
+  rec(0, m);
+  return { count, exceeded: bailed, feasible: true };
+}
+
+// Live preview: candidate count + runtime estimate, plus run-button state and
+// any blocking/soft warnings.
+function updateOptimizerPreview() {
+  const previewEl = document.getElementById('optimizer-preview');
+  const warnEl    = document.getElementById('optimizer-warning');
+  const capsNote  = document.getElementById('optimizer-caps-note');
+  if (!previewEl) return;
+
+  const keys = optimizerSelectedKeys();
+  const { plan, hasSpending } = getSimulatorPlanForOptimizer();
+  const step = OPTIMIZER_STATE.step;
+
+  let count = 0, exceeded = false, feasible = true;
+  if (keys.length >= 2) {
+    const { m, lo, hi } = optimizerUnitBounds(keys, step);
+    const res = countGridCompositions(lo, hi, m, OPTIMIZER_CANDIDATE_CAP);
+    count = res.count; exceeded = res.exceeded; feasible = res.feasible;
+  }
+  OPTIMIZER_STATE.lastCount = count;
+
+  // Preview text
+  if (keys.length < 2) {
+    previewEl.textContent = 'Select at least 2 asset classes above to optimize.';
+  } else if (!feasible) {
+    previewEl.textContent = 'No portfolio fits these limits.';
+  } else if (exceeded) {
+    previewEl.innerHTML = `<strong>2,000+</strong> candidate portfolios — too many to run.`;
+  } else {
+    const estMs = count * OPTIMIZER_STATE.simsPerCandidate * plan.period_years *
+                  OPTIMIZER_MS_PER_SIM_YEAR / OPTIMIZER_STATE.poolSize;
+    const estStr = estMs < 1000 ? '~1s' : `~${Math.round(estMs / 1000)}s`;
+    previewEl.innerHTML =
+      `<strong>${count.toLocaleString('en-US')}</strong> candidate portfolio${count === 1 ? '' : 's'}` +
+      ` · <span class="optimizer-preview__est">${estStr} on ${OPTIMIZER_STATE.poolSize} core${OPTIMIZER_STATE.poolSize === 1 ? '' : 's'}</span>`;
+  }
+
+  // Blocking / soft warnings
+  let warn = '';
+  if (keys.length >= 2 && !feasible) {
+    warn = 'No portfolio fits these limits — your minimums add up past 100%, or your maximums don’t reach 100%. Loosen a limit.';
+  } else if (exceeded) {
+    warn = `Too many portfolios to run (over ${OPTIMIZER_CANDIDATE_CAP.toLocaleString('en-US')}). Use a coarser weight step or tighten per-asset limits.`;
+  } else if (count > OPTIMIZER_CANDIDATE_WARN) {
+    warn = `Large search (${count.toLocaleString('en-US')} portfolios). This may take a while — a coarser step will speed it up.`;
+  }
+  if (warnEl) {
+    warnEl.hidden = warn === '';
+    warnEl.textContent = warn;
+  }
+  if (capsNote) {
+    capsNote.textContent = keys.length >= 2
+      ? `Limits snap to the ${step}% weight grid.`
+      : '';
+  }
+
+  updateOptimizerRunState({ keys, hasSpending, count, exceeded, feasible });
+}
+
+function updateOptimizerRunState({ keys, hasSpending, count, exceeded, feasible }) {
+  const btn = document.getElementById('optimizer-run');
+  if (!btn) return;
+  const floorValid = OPTIMIZER_STATE.floorPct >= 0 && OPTIMIZER_STATE.floorPct <= 100;
+  const configValid = hasSpending && keys.length >= 2 && feasible && !exceeded &&
+                      count >= 1 && count <= OPTIMIZER_CANDIDATE_CAP && floorValid;
+  btn.disabled = !configValid || !OPTIMIZER_ENGINE_READY;
+  btn.title = OPTIMIZER_ENGINE_READY ? '' : 'Optimization engine arrives in the next update.';
 }
 
 /* -----------------------------------------------------------

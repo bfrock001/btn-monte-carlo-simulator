@@ -702,6 +702,7 @@
           <a class="step3-toolnav__link" href="#reference-section">Asset Class Data</a>
           <a class="step3-toolnav__link" href="#correlation-section">Correlation Matrix</a>
           <a class="step3-toolnav__link" href="#periodic-section">Periodic Table</a>
+          <a class="step3-toolnav__link" href="#optimizer-section">Portfolio Optimizer</a>
         </nav>
 
         <!-- Shared controls: date range + asset selection drive all tools below -->
@@ -859,6 +860,84 @@
               <tbody id="periodic-tbody"></tbody>
             </table>
           </div>
+        </section>
+
+        <!-- ============================================================
+             Tool 4 · Portfolio Optimizer (success-adjusted efficient frontier)
+             ============================================================ -->
+        <section id="optimizer-section" class="reference-section" aria-labelledby="optimizer-heading">
+          <header class="reference-header">
+            <div>
+              <p class="eyebrow">Tool 4 &middot; Optimization</p>
+              <h2 id="optimizer-heading" class="reference-heading">Portfolio Optimizer</h2>
+              <p class="reference-sub" id="optimizer-sub"></p>
+              <p class="reference-source">Sweeps a constrained grid of allocations &middot; holds your Simulator plan fixed &middot; maximizes real (inflation-adjusted) median CAGR subject to a success floor</p>
+            </div>
+          </header>
+
+          <p class="optimizer-methodology">
+            This tool searches for the best mix of your selected asset classes. It holds
+            everything on the <strong>Simulator</strong> tab fixed &mdash; starting balance,
+            horizon, spending, guaranteed income, and withdrawal strategy &mdash; and varies
+            <strong>only the allocation</strong>. For every candidate portfolio it runs the same
+            Monte Carlo engine, then finds the one with the highest real median growth that still
+            keeps your chance of success at or above your floor. Because &ldquo;success&rdquo; means
+            &ldquo;didn&rsquo;t run out of money,&rdquo; <strong>this only works when your plan has
+            spending</strong> &mdash; set an annual expense on the Simulator tab first.
+          </p>
+
+          <!-- Plan snapshot / spending gate (rendered by JS from the Simulator's current inputs) -->
+          <div id="optimizer-plan" class="optimizer-plan" aria-live="polite"></div>
+
+          <!-- Controls -->
+          <div id="optimizer-controls" class="optimizer-controls">
+            <div class="optimizer-controls__row">
+              <div class="optimizer-field">
+                <label class="field-label" for="optimizer-step">Weight step</label>
+                <select id="optimizer-step" class="select"></select>
+                <p class="field-note small">Allocations move in these increments.</p>
+              </div>
+              <div class="optimizer-field">
+                <label class="field-label" for="optimizer-floor">Minimum success rate</label>
+                <div class="optimizer-floor-wrap">
+                  <input id="optimizer-floor" class="num-input" type="number" min="0" max="100" step="1" inputmode="numeric" autocomplete="off" />
+                  <span class="optimizer-floor-pct">%</span>
+                </div>
+                <p class="field-note small">The winning portfolio must clear this.</p>
+              </div>
+              <div class="optimizer-field">
+                <label class="field-label" for="optimizer-sims">Simulations per portfolio</label>
+                <select id="optimizer-sims" class="select"></select>
+                <p class="field-note small">Fewer = faster but noisier. Re-check the winner at full sims in the Simulator.</p>
+              </div>
+            </div>
+
+            <div class="optimizer-caps">
+              <div class="optimizer-caps__head">
+                <label class="field-label">Per-asset limits <span class="field-note small">&mdash; min / max % of the portfolio (blank = 0 / 100)</span></label>
+              </div>
+              <div id="optimizer-caps-rows" class="optimizer-caps__rows"></div>
+              <p id="optimizer-caps-note" class="field-note small"></p>
+            </div>
+
+            <div class="optimizer-run-row">
+              <div id="optimizer-preview" class="optimizer-preview" aria-live="polite"></div>
+              <button type="button" id="optimizer-run" class="btn-primary" disabled>Run optimizer</button>
+            </div>
+            <p id="optimizer-warning" class="field-warning" hidden></p>
+          </div>
+
+          <!-- Progress -->
+          <div id="optimizer-progress" class="dev-progress" hidden>
+            <div class="dev-progress__bar"><div class="dev-progress__fill" id="optimizer-progress-fill"></div></div>
+            <p class="dev-progress__label" id="optimizer-progress-label">Optimizing&hellip;</p>
+          </div>
+
+          <!-- Empty / gate message -->
+          <div id="optimizer-empty" class="correlation-empty" hidden></div>
+
+          <!-- Results (populated by the engine in later phases) -->
+          <div id="optimizer-results" class="optimizer-results" hidden></div>
         </section>
 
       </div><!-- /tab-data -->
