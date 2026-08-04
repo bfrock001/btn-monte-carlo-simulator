@@ -3494,3 +3494,45 @@ em { font-style: italic; }
   outline: 2px solid var(--navy);
   outline-offset: 2px;
 }
+
+/* ---- Mode toggle: free vs. two-step (two selectable cards) ---- */
+.optimizer-mode {
+  display: flex;
+  gap: 10px;
+  margin: 0 0 22px;
+  flex-wrap: wrap;
+}
+.optimizer-mode__btn {
+  flex: 1 1 220px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  text-align: left;
+  padding: 11px 15px;
+  background: transparent;
+  border: 1.4px solid rgba(31, 61, 107, 0.20);
+  border-radius: 6px;
+  cursor: pointer;
+  font-family: var(--font-sans);
+  transition: border-color 120ms ease, background 120ms ease, box-shadow 120ms ease;
+}
+.optimizer-mode__btn:hover { border-color: var(--navy); }
+.optimizer-mode__btn.is-active {
+  border-color: var(--navy);
+  background: rgba(31, 61, 107, 0.06);
+  box-shadow: inset 0 0 0 1px var(--navy);
+}
+.optimizer-mode__btn:focus-visible {
+  outline: 2px solid var(--navy);
+  outline-offset: 2px;
+}
+.optimizer-mode__title {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--ink);
+}
+.optimizer-mode__sub {
+  font-size: 11.5px;
+  color: var(--soft);
+}
+.optimizer-twostep { margin-top: 2px; }

@@ -1005,9 +1005,11 @@ const OPTIMIZER_STATE = {
   poolSize: Math.max(1, Math.min(navigator.hardwareConcurrency || 4, 4)),
   running: false,  // true while a batch is in flight
   lastRun: null,   // { points, plan, floorPct, N, step, elapsedMs, results }
+  mode: 'free',    // 'free' (one-shot grid) | 'twostep' (stock/bond split → refine)
 };
 
 const OPTIMIZER_STORAGE_KEY = 'btn-mcsim-optimizer-selection';
+const OPTIMIZER_MODE_KEY    = 'btn-mcsim-optimizer-mode';
 
 /* ---- Optimizer's own asset universe (add/delete), independent of the Data tab.
    Mirrors the Data-tab chip + add-menu pattern, bound to STATE.optimizer. ---- */
@@ -1238,8 +1240,50 @@ function initOptimizer() {
     renderOptimizerControls();
   });
 
+  initOptimizerMode();
   initOptimizerAssetSelection();
   renderOptimizerControls();
+}
+
+/* ---- Mode toggle: free (one-shot grid) vs. two-step (stock/bond split first).
+   Free mode is the original tool, untouched; two-step is built in c18i / c18j. ---- */
+function initOptimizerMode() {
+  let stored = null;
+  try { stored = localStorage.getItem(OPTIMIZER_MODE_KEY); } catch {}
+  if (stored === 'free' || stored === 'twostep') OPTIMIZER_STATE.mode = stored;
+
+  document.querySelectorAll('#optimizer-mode .optimizer-mode__btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const mode = btn.dataset.mode === 'twostep' ? 'twostep' : 'free';
+      if (mode === OPTIMIZER_STATE.mode) return;
+      OPTIMIZER_STATE.mode = mode;
+      try { localStorage.setItem(OPTIMIZER_MODE_KEY, mode); } catch {}
+      applyOptimizerMode();
+    });
+  });
+  applyOptimizerMode();
+}
+
+// Reflect the active mode: highlight the button, show the matching block, and
+// (in two-step) render its panels.
+function applyOptimizerMode() {
+  const mode = OPTIMIZER_STATE.mode;
+  document.querySelectorAll('#optimizer-mode .optimizer-mode__btn').forEach((btn) => {
+    const active = btn.dataset.mode === mode;
+    btn.classList.toggle('is-active', active);
+    btn.setAttribute('aria-selected', active ? 'true' : 'false');
+  });
+  const free = document.getElementById('optimizer-free');
+  const two  = document.getElementById('optimizer-twostep');
+  if (free) free.hidden = mode !== 'free';
+  if (two)  two.hidden  = mode !== 'twostep';
+  if (mode === 'twostep') renderOptimizerTwoStep();
+}
+
+// Two-step flow renderer. Step 1 (split frontier) lands in c18i, Step 2 (refine
+// within the locked split) in c18j. Stub for now.
+function renderOptimizerTwoStep() {
+  /* populated in c18i / c18j */
 }
 
 // Rebuild the parts of Tool 4 that depend on the shared selection or the
@@ -1249,6 +1293,7 @@ function renderOptimizerControls() {
   renderOptimizerPlan();
   renderOptimizerCaps();
   updateOptimizerPreview();
+  applyOptimizerMode();
 }
 
 // clamp helper: returns a number in [0,100], or the fallback for NaN/blank.
@@ -1342,6 +1387,36 @@ function getSimulatorPlanForOptimizer() {
     strategy_params:           { ...INPUT_STATE.strategy_params },
   };
   return { plan, hasSpending, bucket1Annual };
+}
+
+// Annualized volatility of a portfolio's *historical* annual returns over the
+// plan period — the classic "risk" number paired with return on a frontier.
+// Deterministic and main-thread (independent of the Monte Carlo draws), computed
+// from STATE.data.annual_returns (the same series the correlation matrix uses).
+// `allocation` is [{ key, pct }] with pct in whole %. annual_returns are stored
+// in percent (e.g. 21.5 = +21.5%), so the result is a std dev already in percent
+// points (e.g. 17.3 = 17.3% annualized vol) — null if fewer than 2 usable years.
+// Sample std dev (n-1), matching spreadsheet STDEV.
+function portfolioAnnualVol(allocation, start, end) {
+  if (start == null || end == null) return null;
+  const weights = allocation.map((a) => ({ key: a.key, w: a.pct / 100 }));
+  const series = [];
+  for (const row of STATE.data.annual_returns) {
+    if (row.year < start || row.year > end) continue;
+    let r = 0, ok = true;
+    for (const { key, w } of weights) {
+      const v = row[key];
+      if (v == null) { ok = false; break; }
+      r += w * v;
+    }
+    if (ok) series.push(r);
+  }
+  const n = series.length;
+  if (n < 2) return null;
+  const mean = series.reduce((s, x) => s + x, 0) / n;
+  let sq = 0;
+  for (const x of series) sq += (x - mean) * (x - mean);
+  return Math.sqrt(sq / (n - 1));
 }
 
 function optimizerPeriodLabel(plan) {
@@ -1478,8 +1553,8 @@ function renderOptimizerCaps() {
    is m = 100/step, and each asset i is bounded to [lo_i, hi_i] units derived
    from its min/max caps (min rounds up, max rounds down to the step grid). */
 
-function optimizerUnitBounds(keys, step) {
-  const m = Math.round(100 / step);
+function optimizerUnitBounds(keys, step, targetPct = 100) {
+  const m = Math.round(targetPct / step);
   const lo = [], hi = [];
   for (const k of keys) {
     const cap = OPTIMIZER_STATE.caps[k] || {};
@@ -1644,9 +1719,9 @@ function updateOptimizerRunState({ keys, hasSpending, count, exceeded, feasible 
    allocation array [{key, pct}] filtered to non-zero weights — a 0% asset must
    not be sent to the worker, or buildEligibleRows would still require its data
    and needlessly shrink the eligible-year pool. */
-function enumerateGridCompositions(keys, step, capCount) {
+function enumerateGridCompositions(keys, step, capCount, targetPct = 100) {
   const k = keys.length;
-  const { m, lo, hi } = optimizerUnitBounds(keys, step);
+  const { m, lo, hi } = optimizerUnitBounds(keys, step, targetPct);
   for (let i = 0; i < k; i++) if (lo[i] > hi[i]) return [];
   const sufLo = new Array(k + 1).fill(0);
   const sufHi = new Array(k + 1).fill(0);
@@ -1681,7 +1756,71 @@ function enumerateGridCompositions(keys, step, capCount) {
   return out;
 }
 
-/* ---- Run orchestration: worker pool over candidate slices ---- */
+/* ---- Reusable worker-pool batch ----
+   Runs an array of candidate allocations through the optimize engine across a
+   pool of workers and resolves with the merged data points. Both free mode and
+   the two-step flow (Step 1 splits, Step 2 refine) call this. The caller owns the
+   OPTIMIZER_STATE.running guard and the busy/progress UI; this helper just fans
+   the work out and merges it back. */
+function runOptimizeBatch(candidates, plan, N, { onProgress } = {}) {
+  return new Promise((resolve, reject) => {
+    const total = candidates.length;
+    if (total === 0) { resolve([]); return; }
+
+    // Split into contiguous slices, one per pooled worker.
+    const poolSize = Math.max(1, Math.min(OPTIMIZER_STATE.poolSize, total));
+    const sliceSize = Math.ceil(total / poolSize);
+    const slices = [];
+    for (let i = 0; i < total; i += sliceSize) slices.push(candidates.slice(i, i + sliceSize));
+    const target = slices.length;
+
+    const results  = new Array(target);
+    const doneByWk = new Array(target).fill(0);
+    const workers  = [];
+    let finished = 0;
+    let aborted = false;
+    const cleanup = () => workers.forEach((w) => { try { w.terminate(); } catch {} });
+
+    slices.forEach((slice, wi) => {
+      let w;
+      try {
+        w = new Worker('./simulation.worker.js');
+      } catch (e) {
+        aborted = true;
+        cleanup();
+        reject(new Error('Could not start the optimization workers. Your browser may not support Web Workers.'));
+        return;
+      }
+      workers.push(w);
+      w.onmessage = (e) => {
+        if (aborted) return;
+        const m = e.data || {};
+        if (m.type === 'optimize_progress') {
+          doneByWk[wi] = m.done;
+          let done = 0; for (const d of doneByWk) done += d;
+          if (onProgress) onProgress(done, total);
+        } else if (m.type === 'optimize_results') {
+          results[wi] = m.points;
+          finished++;
+          if (finished === target) { cleanup(); resolve(results.flat()); }
+        } else if (m.type === 'optimize_error') {
+          aborted = true;
+          cleanup();
+          reject(new Error(m.message || 'The optimization engine reported an error.'));
+        }
+      };
+      w.onerror = (err) => {
+        if (aborted) return;
+        aborted = true;
+        cleanup();
+        reject(new Error((err && err.message) || 'Optimization worker error.'));
+      };
+      w.postMessage({ type: 'optimize', plan, candidates: slice, simsPerCandidate: N, data: STATE.data });
+    });
+  });
+}
+
+/* ---- Free-mode run: enumerate the full grid, batch it, render results. ---- */
 function runOptimizer() {
   if (OPTIMIZER_STATE.running) return;
   const { covered: keys } = optimizerGridPartition(); // grid = full-coverage assets only
@@ -1696,72 +1835,21 @@ function runOptimizer() {
   const N = OPTIMIZER_STATE.simsPerCandidate;
   const total = candidates.length;
 
-  // Split into contiguous slices, one per pooled worker.
-  const poolSize = Math.max(1, Math.min(OPTIMIZER_STATE.poolSize, total));
-  const sliceSize = Math.ceil(total / poolSize);
-  const slices = [];
-  for (let i = 0; i < total; i += sliceSize) slices.push(candidates.slice(i, i + sliceSize));
-  const target = slices.length;
-
   OPTIMIZER_STATE.running = true;
   setOptimizerBusy(true);
   hideElement('optimizer-empty');
   optimizerUpdateProgress(0, total);
-
-  const results  = new Array(target);
-  const doneByWk = new Array(target).fill(0);
-  const workers  = [];
-  let finished = 0;
-  let aborted = false;
   const startedAt = performance.now();
-  const cleanup = () => workers.forEach((w) => { try { w.terminate(); } catch {} });
 
-  slices.forEach((slice, wi) => {
-    let w;
-    try {
-      w = new Worker('./simulation.worker.js');
-    } catch (e) {
-      aborted = true;
-      cleanup();
+  runOptimizeBatch(candidates, plan, N, { onProgress: optimizerUpdateProgress })
+    .then((points) => {
+      finishOptimizer(points, plan, floorPct, N, step, performance.now() - startedAt, keys);
+    })
+    .catch((err) => {
       OPTIMIZER_STATE.running = false;
       setOptimizerBusy(false);
-      showOptimizerError('Could not start the optimization workers. Your browser may not support Web Workers.');
-      return;
-    }
-    workers.push(w);
-    w.onmessage = (e) => {
-      if (aborted) return;
-      const m = e.data || {};
-      if (m.type === 'optimize_progress') {
-        doneByWk[wi] = m.done;
-        let done = 0; for (const d of doneByWk) done += d;
-        optimizerUpdateProgress(done, total);
-      } else if (m.type === 'optimize_results') {
-        results[wi] = m.points;
-        finished++;
-        if (finished === target) {
-          cleanup();
-          const points = results.flat();
-          finishOptimizer(points, plan, floorPct, N, step, performance.now() - startedAt, keys);
-        }
-      } else if (m.type === 'optimize_error') {
-        aborted = true;
-        cleanup();
-        OPTIMIZER_STATE.running = false;
-        setOptimizerBusy(false);
-        showOptimizerError(m.message || 'The optimization engine reported an error.');
-      }
-    };
-    w.onerror = (err) => {
-      if (aborted) return;
-      aborted = true;
-      cleanup();
-      OPTIMIZER_STATE.running = false;
-      setOptimizerBusy(false);
-      showOptimizerError((err && err.message) || 'Optimization worker error.');
-    };
-    w.postMessage({ type: 'optimize', plan, candidates: slice, simsPerCandidate: N, data: STATE.data });
-  });
+      showOptimizerError(err && err.message ? err.message : 'The optimization engine reported an error.');
+    });
 }
 
 function finishOptimizer(points, plan, floorPct, N, step, elapsedMs, keys) {

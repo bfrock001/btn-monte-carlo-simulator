@@ -903,6 +903,21 @@
           <!-- Plan snapshot / spending gate (rendered by JS from the Simulator's current inputs) -->
           <div id="optimizer-plan" class="optimizer-plan" aria-live="polite"></div>
 
+          <!-- Mode: optimize freely (any mix) vs. two-step (stock/bond split first) -->
+          <div id="optimizer-mode" class="optimizer-mode" role="tablist" aria-label="Optimization approach">
+            <button type="button" class="optimizer-mode__btn is-active" data-mode="free" role="tab" aria-selected="true">
+              <span class="optimizer-mode__title">Optimize freely</span>
+              <span class="optimizer-mode__sub">Search any mix of your asset classes</span>
+            </button>
+            <button type="button" class="optimizer-mode__btn" data-mode="twostep" role="tab" aria-selected="false">
+              <span class="optimizer-mode__title">Two-step: stock/bond first</span>
+              <span class="optimizer-mode__sub">Pick a split, then refine inside it</span>
+            </button>
+          </div>
+
+          <!-- FREE MODE: the original one-shot grid sweep (controls + progress + results) -->
+          <div id="optimizer-free">
+
           <!-- Controls -->
           <div id="optimizer-controls" class="optimizer-controls">
             <div class="optimizer-controls__row">
@@ -958,6 +973,13 @@
 
           <!-- Results (populated by the engine in later phases) -->
           <div id="optimizer-results" class="optimizer-results" hidden></div>
+
+          </div><!-- /optimizer-free -->
+
+          <!-- TWO-STEP MODE: stock/bond split first, then refine within it (c18i / c18j) -->
+          <div id="optimizer-twostep" class="optimizer-twostep" hidden>
+            <p class="field-note">The two-step flow arrives in the next update.</p>
+          </div>
         </section>
 
       </div><!-- /tab-optimizer -->
