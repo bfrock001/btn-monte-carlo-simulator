@@ -942,6 +942,12 @@ function renderPeriodicTable() {
     sub.textContent =
       `${keys.length} assets · ${periodLabel} · ${years.length} year column${years.length === 1 ? '' : 's'}.`;
   }
+
+  // Wide ranges get parked at the latest year — recent decades are what
+  // most users open the table to read first. Rank column stays sticky-left.
+  if (scroll.scrollWidth > scroll.clientWidth) {
+    scroll.scrollLeft = scroll.scrollWidth;
+  }
 }
 
 /* -----------------------------------------------------------

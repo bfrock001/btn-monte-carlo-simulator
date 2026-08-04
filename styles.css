@@ -2756,20 +2756,32 @@ em { font-style: italic; }
 }
 
 @media print {
-  /* Hide everything except the results panel and our injected blocks */
+  /* Hide everything except the results panel and our injected blocks.
+     .reference-section is no longer force-hidden here — tab-panel[hidden]
+     already hides the whole Data tab (which contains the ref/correlation/
+     periodic sections) when the Simulator tab is active, and the Data tab
+     itself should be printable when it's the active tab. */
   .input-panel,
   .results-placeholder,
   #dev-progress,
   #dev-diagnostics,
   #export-card,
   .modal-overlay,
-  .reference-section,
+  .tab-nav,
+  .step3-controls,
   .page-footer,
   .page-header__sub,
   #dev-headline,
   .chart-toggle,
   .chart-card__intro,
-  .saved-scenarios-drawer { display: none !important; }
+  .saved-scenarios-drawer,
+  #termsGate { display: none !important; }
+
+  /* When printing from the Simulator PDF flow, keep the historical Data
+     tab contents hidden even if a user left the Data tab active. The
+     body.is-printing class is toggled by the Simulator's Download PDF. */
+  body.is-printing #tab-data { display: none !important; }
+  body.is-printing #tab-simulator { display: block !important; }
 
   /* Show injected print-only nodes */
   .print-only { display: block; }
@@ -2917,6 +2929,62 @@ em { font-style: italic; }
     font-size: 9px;
     color: #5A554C;
     line-height: 1.4;
+  }
+
+  /* ---- Step 3 Data tab print styles ----
+     When the Data tab is the active print target (user hits Ctrl+P from
+     the Data tab without going through the Simulator PDF button), keep
+     the section headers, tables, and legends readable at letter size.
+     Sections are Callan-style — allow each to break to a new page. */
+  #tab-data .reference-section {
+    page-break-inside: auto;
+    break-inside: auto;
+    margin-top: 8px;
+    background: #fff !important;
+  }
+  #tab-data .reference-header {
+    border-bottom: 1px solid #cdcaca !important;
+    padding-bottom: 8px !important;
+    margin-bottom: 10px !important;
+  }
+  #tab-data .reference-heading { font-size: 20px !important; }
+  #tab-data .eyebrow { color: #5A554C !important; }
+
+  /* Correlation matrix in print: compact, letterbox scroll disabled */
+  #tab-data .correlation-scroll {
+    overflow: visible !important;
+    border: 1px solid #cdcaca !important;
+  }
+  #tab-data .correlation-table {
+    font-size: 9px !important;
+    page-break-inside: avoid;
+  }
+  #tab-data .correlation-table thead th,
+  #tab-data .correlation-table tbody th,
+  #tab-data .correlation-table tbody td { padding: 3px 4px !important; }
+  #tab-data .correlation-methodology {
+    font-size: 10px !important;
+    padding: 6px 10px !important;
+    background: #f4f0e6 !important;
+  }
+  #tab-data .correlation-legend { font-size: 9.5px !important; }
+
+  /* Periodic table in print: match compact scale, keep colors */
+  #tab-data .periodic-scroll {
+    overflow: visible !important;
+    border: 1px solid #cdcaca !important;
+  }
+  #tab-data .periodic-table { font-size: 8.5px !important; }
+  #tab-data .periodic-table thead th,
+  #tab-data .periodic-table tbody th,
+  #tab-data .periodic-table tbody td { padding: 3px 4px !important; }
+  #tab-data .periodic-table .pt-cell__label { font-size: 8px !important; }
+  #tab-data .periodic-table .pt-cell__ret { font-size: 9px !important; }
+  #tab-data .periodic-legend { font-size: 9.5px !important; margin: 4px 0 8px; }
+  #tab-data .periodic-methodology {
+    font-size: 10px !important;
+    padding: 6px 10px !important;
+    background: #f4f0e6 !important;
   }
 
   /* Force exact color reproduction so charts print with brand colors */
