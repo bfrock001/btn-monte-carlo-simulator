@@ -15,6 +15,9 @@ const STATE = {
     selectedAssets: [],  // populated in initStep3AssetSelection
     rangeValid: true,    // false when custom range < 10 years
   },
+  optimizer: {
+    selectedAssets: [],  // independent of step3; populated in initOptimizerAssetSelection
+  },
 };
 
 const GROUP_ORDER = ['US Equity', 'International Equity', 'Fixed Income', 'Alternatives'];
@@ -207,7 +210,7 @@ function initStep3() {
 
 function bindTabs() {
   const tabs = document.querySelectorAll('.tab-btn');
-  const panelIds = { simulator: 'tab-simulator', data: 'tab-data' };
+  const panelIds = { simulator: 'tab-simulator', data: 'tab-data', optimizer: 'tab-optimizer' };
   tabs.forEach((btn) => {
     btn.addEventListener('click', () => {
       const target = btn.dataset.tab;
@@ -226,8 +229,8 @@ function bindTabs() {
       });
       // The optimizer mirrors the Simulator's current plan (balance, spending,
       // strategy…), which may have changed while that tab was open — refresh it
-      // each time the Data tab is shown.
-      if (target === 'data') renderOptimizerControls();
+      // each time the Optimizer tab is shown.
+      if (target === 'optimizer') renderOptimizerControls();
     });
   });
 }
@@ -461,7 +464,6 @@ function removeStep3Asset(key) {
 function refreshStep3Tools() {
   renderCorrelationMatrix();
   renderPeriodicTable();
-  renderOptimizerControls();
 }
 
 /* -----------------------------------------------------------
@@ -1005,6 +1007,163 @@ const OPTIMIZER_STATE = {
   lastRun: null,   // { points, plan, floorPct, N, step, elapsedMs, results }
 };
 
+const OPTIMIZER_STORAGE_KEY = 'btn-mcsim-optimizer-selection';
+
+/* ---- Optimizer's own asset universe (add/delete), independent of the Data tab.
+   Mirrors the Data-tab chip + add-menu pattern, bound to STATE.optimizer. ---- */
+
+function initOptimizerAssetSelection() {
+  const validKeys = new Set(STATE.assets.map((a) => a.key));
+  let stored = null;
+  try { stored = JSON.parse(localStorage.getItem(OPTIMIZER_STORAGE_KEY)); } catch {}
+  const restored = Array.isArray(stored) ? stored.filter((k) => validKeys.has(k)) : null;
+  STATE.optimizer.selectedAssets =
+    (restored && restored.length >= 1)
+      ? restored
+      : STEP3_DEFAULT_ASSETS.filter((k) => validKeys.has(k));
+  renderOptimizerAssetChips();
+  bindOptimizerAddAssetMenu();
+}
+
+function saveOptimizerSelection() {
+  try { localStorage.setItem(OPTIMIZER_STORAGE_KEY, JSON.stringify(STATE.optimizer.selectedAssets)); } catch {}
+}
+
+function renderOptimizerAssetChips() {
+  const chipContainer = document.getElementById('opt-asset-chips');
+  if (!chipContainer) return;
+  chipContainer.innerHTML = '';
+
+  const byKey = new Map(STATE.assets.map((a) => [a.key, a]));
+  const orderIndex = new Map();
+  STATE.assets.forEach((a, i) => orderIndex.set(a.key, i));
+  const sorted = [...STATE.optimizer.selectedAssets]
+    .sort((a, b) => (orderIndex.get(a) ?? 0) - (orderIndex.get(b) ?? 0));
+
+  sorted.forEach((key) => {
+    const asset = byKey.get(key);
+    if (!asset) return;
+    const chip = document.createElement('span');
+    chip.className = 'asset-chip';
+    chip.dataset.group = groupSlug(asset.group);
+    chip.innerHTML =
+      `<span class="asset-chip__label">${escapeHtml(asset.name)}</span>` +
+      `<button type="button" class="asset-chip__remove" aria-label="Remove ${escapeHtml(asset.name)}" data-key="${escapeHtml(key)}">&times;</button>`;
+    chipContainer.appendChild(chip);
+  });
+
+  chipContainer.querySelectorAll('.asset-chip__remove').forEach((btn) => {
+    btn.addEventListener('click', () => removeOptimizerAsset(btn.dataset.key));
+  });
+
+  updateOptimizerAssetCount();
+}
+
+function updateOptimizerAssetCount() {
+  const countEl = document.getElementById('opt-selected-count');
+  const warnEl  = document.getElementById('opt-asset-warning');
+  const n = STATE.optimizer.selectedAssets.length;
+  if (countEl) countEl.textContent = `(${n} selected)`;
+  if (!warnEl) return;
+  if (n < 2) {
+    warnEl.hidden = false;
+    warnEl.textContent = 'Add at least 2 asset classes for the optimizer to compare portfolios.';
+  } else {
+    warnEl.hidden = true;
+    warnEl.textContent = '';
+  }
+}
+
+function bindOptimizerAddAssetMenu() {
+  const btn  = document.getElementById('opt-add-asset-btn');
+  const menu = document.getElementById('opt-add-asset-menu');
+  if (!btn || !menu) return;
+
+  btn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const willOpen = menu.hidden;
+    if (willOpen) buildOptimizerAddAssetMenu();
+    menu.hidden = !willOpen;
+    btn.setAttribute('aria-expanded', willOpen ? 'true' : 'false');
+  });
+
+  document.addEventListener('click', (e) => {
+    if (menu.hidden) return;
+    if (menu.contains(e.target) || e.target === btn) return;
+    menu.hidden = true;
+    btn.setAttribute('aria-expanded', 'false');
+  });
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && !menu.hidden) {
+      menu.hidden = true;
+      btn.setAttribute('aria-expanded', 'false');
+      btn.focus();
+    }
+  });
+}
+
+function buildOptimizerAddAssetMenu() {
+  const menu = document.getElementById('opt-add-asset-menu');
+  if (!menu) return;
+  menu.innerHTML = '';
+
+  const selected = new Set(STATE.optimizer.selectedAssets);
+  const available = STATE.assets.filter((a) => !selected.has(a.key));
+
+  if (available.length === 0) {
+    const empty = document.createElement('div');
+    empty.className = 'asset-selector__empty';
+    empty.textContent = 'All asset classes are already selected.';
+    menu.appendChild(empty);
+    return;
+  }
+
+  const byGroup = new Map();
+  available.forEach((a) => {
+    if (!byGroup.has(a.group)) byGroup.set(a.group, []);
+    byGroup.get(a.group).push(a);
+  });
+
+  GROUP_ORDER.forEach((group) => {
+    if (!byGroup.has(group)) return;
+    const heading = document.createElement('div');
+    heading.className = 'asset-selector__group';
+    heading.textContent = group;
+    menu.appendChild(heading);
+    byGroup.get(group).forEach((a) => {
+      const item = document.createElement('button');
+      item.type = 'button';
+      item.className = 'asset-selector__item';
+      item.dataset.group = groupSlug(a.group);
+      item.dataset.key = a.key;
+      item.textContent = a.name;
+      item.addEventListener('click', () => {
+        addOptimizerAsset(a.key);
+        menu.hidden = true;
+        const btn = document.getElementById('opt-add-asset-btn');
+        if (btn) btn.setAttribute('aria-expanded', 'false');
+      });
+      menu.appendChild(item);
+    });
+  });
+}
+
+function addOptimizerAsset(key) {
+  if (STATE.optimizer.selectedAssets.includes(key)) return;
+  STATE.optimizer.selectedAssets.push(key);
+  saveOptimizerSelection();
+  renderOptimizerAssetChips();
+  renderOptimizerControls();
+}
+
+function removeOptimizerAsset(key) {
+  STATE.optimizer.selectedAssets = STATE.optimizer.selectedAssets.filter((k) => k !== key);
+  saveOptimizerSelection();
+  renderOptimizerAssetChips();
+  renderOptimizerControls();
+}
+
 // One-time setup: build the static selects, seed defaults, bind events.
 function initOptimizer() {
   const stepSel = document.getElementById('optimizer-step');
@@ -1057,6 +1216,7 @@ function initOptimizer() {
   const runBtn = document.getElementById('optimizer-run');
   if (runBtn) runBtn.addEventListener('click', runOptimizer);
 
+  initOptimizerAssetSelection();
   renderOptimizerControls();
 }
 
@@ -1079,7 +1239,7 @@ function clampPct(v, fallback) {
 function optimizerSelectedKeys() {
   const orderIndex = new Map();
   STATE.assets.forEach((a, i) => orderIndex.set(a.key, i));
-  return [...STATE.step3.selectedAssets]
+  return [...STATE.optimizer.selectedAssets]
     .filter((k) => orderIndex.has(k))
     .sort((a, b) => (orderIndex.get(a) ?? 0) - (orderIndex.get(b) ?? 0));
 }

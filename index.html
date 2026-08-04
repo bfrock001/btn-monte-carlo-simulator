@@ -60,6 +60,7 @@
       <nav class="tab-nav" role="tablist" aria-label="App section">
         <button class="tab-btn is-active" role="tab" data-tab="simulator" id="tab-btn-simulator" aria-selected="true" aria-controls="tab-simulator">Simulator</button>
         <button class="tab-btn" role="tab" data-tab="data" id="tab-btn-data" aria-selected="false" aria-controls="tab-data">Data &amp; Correlations</button>
+        <button class="tab-btn" role="tab" data-tab="optimizer" id="tab-btn-optimizer" aria-selected="false" aria-controls="tab-optimizer">Portfolio Optimizer</button>
       </nav>
 
       <!-- =============== TAB: SIMULATOR =============== -->
@@ -702,7 +703,6 @@
           <a class="step3-toolnav__link" href="#reference-section">Asset Class Data</a>
           <a class="step3-toolnav__link" href="#correlation-section">Correlation Matrix</a>
           <a class="step3-toolnav__link" href="#periodic-section">Periodic Table</a>
-          <a class="step3-toolnav__link" href="#optimizer-section">Portfolio Optimizer</a>
         </nav>
 
         <!-- Shared controls: date range + asset selection drive all tools below -->
@@ -862,13 +862,15 @@
           </div>
         </section>
 
-        <!-- ============================================================
-             Tool 4 · Portfolio Optimizer (success-adjusted efficient frontier)
-             ============================================================ -->
+      </div><!-- /tab-data -->
+
+      <!-- =============== TAB: PORTFOLIO OPTIMIZER =============== -->
+      <div id="tab-optimizer" class="tab-panel" role="tabpanel" aria-labelledby="tab-btn-optimizer" hidden>
+
         <section id="optimizer-section" class="reference-section" aria-labelledby="optimizer-heading">
           <header class="reference-header">
             <div>
-              <p class="eyebrow">Tool 4 &middot; Optimization</p>
+              <p class="eyebrow">Success-adjusted frontier</p>
               <h2 id="optimizer-heading" class="reference-heading">Portfolio Optimizer</h2>
               <p class="reference-sub" id="optimizer-sub"></p>
               <p class="reference-source">Sweeps a constrained grid of allocations &middot; holds your Simulator plan fixed &middot; maximizes real (inflation-adjusted) median CAGR subject to a success floor</p>
@@ -885,6 +887,18 @@
             &ldquo;didn&rsquo;t run out of money,&rdquo; <strong>this only works when your plan has
             spending</strong> &mdash; set an annual expense on the Simulator tab first.
           </p>
+
+          <!-- Optimizer's own asset universe: quick add / delete (independent of the Data tab) -->
+          <div class="optimizer-assets">
+            <label class="field-label">Asset classes to optimize <span class="step3-count" id="opt-selected-count"></span></label>
+            <div id="opt-asset-chips" class="asset-chip-list" aria-live="polite"></div>
+            <div class="asset-selector">
+              <button type="button" id="opt-add-asset-btn" class="asset-selector__toggle" aria-haspopup="menu" aria-expanded="false">+ Add asset class &#x25BE;</button>
+              <div id="opt-add-asset-menu" class="asset-selector__menu" hidden role="menu"></div>
+            </div>
+            <p id="opt-asset-warning" class="field-warning" hidden></p>
+            <p class="field-note small">The optimizer searches over these. Add or remove any of the 22 asset classes &mdash; this selection is separate from the Data &amp; Correlations tab.</p>
+          </div>
 
           <!-- Plan snapshot / spending gate (rendered by JS from the Simulator's current inputs) -->
           <div id="optimizer-plan" class="optimizer-plan" aria-live="polite"></div>
@@ -941,7 +955,7 @@
           <div id="optimizer-results" class="optimizer-results" hidden></div>
         </section>
 
-      </div><!-- /tab-data -->
+      </div><!-- /tab-optimizer -->
     </div><!-- /app-shell -->
   </main>
 

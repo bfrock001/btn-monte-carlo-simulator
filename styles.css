@@ -2825,7 +2825,8 @@ em { font-style: italic; }
   /* When printing from the Simulator PDF flow, keep the historical Data
      tab contents hidden even if a user left the Data tab active. The
      body.is-printing class is toggled by the Simulator's Download PDF. */
-  body.is-printing #tab-data { display: none !important; }
+  body.is-printing #tab-data,
+  body.is-printing #tab-optimizer { display: none !important; }
   body.is-printing #tab-simulator { display: block !important; }
 
   /* Show injected print-only nodes */
@@ -3154,6 +3155,11 @@ em { font-style: italic; }
   border-radius: 0 3px 3px 0;
 }
 .optimizer-methodology strong { color: var(--ink); font-weight: 600; }
+
+/* Optimizer's own asset-selection block (reuses .asset-chip / .asset-selector) */
+.optimizer-assets { margin-bottom: 20px; }
+.optimizer-assets .field-label { margin-bottom: 8px; }
+.optimizer-assets .asset-chip-list { margin-bottom: 10px; }
 
 /* Plan snapshot / spending gate */
 .optimizer-plan {
