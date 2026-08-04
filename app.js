@@ -1258,6 +1258,18 @@ function countGridCompositions(lo, hi, m, cap) {
   return { count, exceeded: bailed, feasible: true };
 }
 
+// Smallest (finest) weight step from the options that keeps the candidate count
+// within `cap` for the current assets/caps. Returns { step, count } or null when
+// even the coarsest step is too wide.
+function finestStepUnderCap(keys, cap) {
+  for (const s of OPTIMIZER_STEP_OPTIONS) { // ascending: 5, 10, 20, 25
+    const { m, lo, hi } = optimizerUnitBounds(keys, s);
+    const r = countGridCompositions(lo, hi, m, cap);
+    if (r.feasible && !r.exceeded && r.count >= 1) return { step: s, count: r.count };
+  }
+  return null;
+}
+
 // Live preview: candidate count + runtime estimate, plus run-button state and
 // any blocking/soft warnings.
 function updateOptimizerPreview() {
@@ -1294,18 +1306,43 @@ function updateOptimizerPreview() {
       ` · <span class="optimizer-preview__est">${estStr} on ${OPTIMIZER_STATE.poolSize} core${OPTIMIZER_STATE.poolSize === 1 ? '' : 's'}</span>`;
   }
 
-  // Blocking / soft warnings
-  let warn = '';
+  // Blocking / soft warnings. When over the cap, offer a one-click coarser step
+  // that fits (the combinatorics aren't obvious), or — if even the coarsest step
+  // is too wide — tell the user to drop assets.
+  let warnHtml = '';
+  let suggestStep = null;
   if (keys.length >= 2 && !feasible) {
-    warn = 'No portfolio fits these limits — your minimums add up past 100%, or your maximums don’t reach 100%. Loosen a limit.';
+    warnHtml = 'No portfolio fits these limits — your minimums add up past 100%, or your maximums don’t reach 100%. Loosen a limit.';
   } else if (exceeded) {
-    warn = `Too many portfolios to run (over ${OPTIMIZER_CANDIDATE_CAP.toLocaleString('en-US')}). Use a coarser weight step or tighten per-asset limits.`;
+    const fit = finestStepUnderCap(keys, OPTIMIZER_CANDIDATE_CAP);
+    if (fit && fit.step > step) {
+      suggestStep = fit.step;
+      warnHtml =
+        `Too many portfolios at a ${step}% step. ` +
+        `<button type="button" class="optimizer-inline-btn" id="optimizer-suggest-step">` +
+          `Switch to ${fit.step}% step (${fit.count.toLocaleString('en-US')} portfolios)</button>` +
+        `, or remove an asset / tighten per-asset limits.`;
+    } else {
+      const coarsest = OPTIMIZER_STEP_OPTIONS[OPTIMIZER_STEP_OPTIONS.length - 1];
+      warnHtml =
+        `Too many portfolios to run (over ${OPTIMIZER_CANDIDATE_CAP.toLocaleString('en-US')}), even at a ${coarsest}% step. ` +
+        `A grid over ${keys.length} assets is very wide — remove a few asset classes above, or add per-asset limits.`;
+    }
   } else if (count > OPTIMIZER_CANDIDATE_WARN) {
-    warn = `Large search (${count.toLocaleString('en-US')} portfolios). This may take a while — a coarser step will speed it up.`;
+    warnHtml = `Large search (${count.toLocaleString('en-US')} portfolios). This may take a while — a coarser step will speed it up.`;
   }
   if (warnEl) {
-    warnEl.hidden = warn === '';
-    warnEl.textContent = warn;
+    warnEl.hidden = warnHtml === '';
+    warnEl.innerHTML = warnHtml;
+    if (suggestStep) {
+      const sug = document.getElementById('optimizer-suggest-step');
+      if (sug) sug.addEventListener('click', () => {
+        OPTIMIZER_STATE.step = suggestStep;
+        const stepSel = document.getElementById('optimizer-step');
+        if (stepSel) stepSel.value = String(suggestStep);
+        renderOptimizerControls();
+      });
+    }
   }
   if (capsNote) {
     capsNote.textContent = keys.length >= 2

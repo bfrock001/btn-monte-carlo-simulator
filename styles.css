@@ -3295,6 +3295,21 @@ em { font-style: italic; }
 .optimizer-preview__est { color: var(--faint); }
 .optimizer-run-row .btn-primary { min-width: 160px; }
 
+/* Inline one-click fix inside the warning (e.g. "Switch to 25% step") */
+.optimizer-inline-btn {
+  font: inherit;
+  font-weight: 600;
+  color: var(--navy);
+  background: none;
+  border: none;
+  border-bottom: 1px solid currentColor;
+  padding: 0;
+  margin: 0 1px;
+  cursor: pointer;
+}
+.optimizer-inline-btn:hover { color: var(--clay); }
+.optimizer-inline-btn:focus-visible { outline: 2px solid var(--navy); outline-offset: 2px; }
+
 .optimizer-results[hidden] { display: none; }
 .optimizer-results { margin-top: 22px; }
 
