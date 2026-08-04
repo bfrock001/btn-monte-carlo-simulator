@@ -696,10 +696,18 @@
       <!-- =============== TAB: DATA & CORRELATIONS =============== -->
       <div id="tab-data" class="tab-panel" role="tabpanel" aria-labelledby="tab-btn-data" hidden>
 
-        <!-- Shared Step 3 controls: date range + asset selection drive all tools below -->
+        <!-- In-page navigation: jump to each tool -->
+        <nav class="step3-toolnav" aria-label="Tool navigation">
+          <span class="step3-toolnav__label">Jump to:</span>
+          <a class="step3-toolnav__link" href="#reference-section">Asset Class Data</a>
+          <a class="step3-toolnav__link" href="#correlation-section">Correlation Matrix</a>
+          <a class="step3-toolnav__link" href="#periodic-section">Periodic Table</a>
+        </nav>
+
+        <!-- Shared controls: date range + asset selection drive all tools below -->
         <section class="step3-controls" aria-labelledby="step3-controls-heading">
           <header class="step3-controls__head">
-            <p class="eyebrow">Step 3 · Data &amp; Correlations</p>
+            <p class="eyebrow">Data &amp; Correlations</p>
             <h2 id="step3-controls-heading" class="reference-heading">Set the date range &amp; asset selection</h2>
             <p class="reference-sub">All tools below recompute from the same date range. Asset selection drives the periodic table and correlation matrix (the asset stats table always shows all 22 assets).</p>
           </header>

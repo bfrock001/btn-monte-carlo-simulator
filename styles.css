@@ -305,6 +305,47 @@ em { font-style: italic; }
 .tab-panel[hidden] { display: none !important; }
 
 /* ============================================================
+   Data-tab in-page tool navigation ("Jump to:" links)
+   ============================================================ */
+.step3-toolnav {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  padding: 10px 14px;
+  margin-bottom: 18px;
+  background: var(--paper);
+  border: 1px solid var(--rule);
+  border-radius: 3px;
+  font-family: var(--font-sans);
+}
+.step3-toolnav__label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--faint);
+  margin-right: 4px;
+}
+.step3-toolnav__link {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--soft);
+  text-decoration: none;
+  padding: 4px 10px;
+  border-radius: 2px;
+  border: 1px solid transparent;
+  transition: color 120ms ease, background 120ms ease, border-color 120ms ease;
+}
+.step3-toolnav__link:hover,
+.step3-toolnav__link:focus-visible {
+  color: var(--ink);
+  background: var(--paper-alt);
+  border-color: var(--rule);
+  outline: none;
+}
+
+/* ============================================================
    Step 3 shared controls (date range + asset selection)
    ============================================================ */
 .step3-controls {
@@ -322,12 +363,13 @@ em { font-style: italic; }
 .step3-controls__head .reference-sub { margin-top: 6px; }
 .step3-controls__grid {
   display: grid;
-  grid-template-columns: minmax(320px, auto) 1fr;
-  gap: 32px;
+  grid-template-columns: 1fr;
+  gap: 22px;
   align-items: start;
 }
-@media (max-width: 900px) {
-  .step3-controls__grid { grid-template-columns: 1fr; gap: 20px; }
+.step3-controls__grid > .step3-controls__field + .step3-controls__field {
+  padding-top: 20px;
+  border-top: 1px solid var(--rule);
 }
 .step3-controls__field .field-label { margin-bottom: 8px; }
 .step3-controls__field .period-toggle { display: flex; flex-wrap: wrap; }
