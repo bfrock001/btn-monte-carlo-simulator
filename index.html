@@ -978,7 +978,68 @@
 
           <!-- TWO-STEP MODE: stock/bond split first, then refine within it (c18i / c18j) -->
           <div id="optimizer-twostep" class="optimizer-twostep" hidden>
-            <p class="field-note">The two-step flow arrives in the next update.</p>
+
+            <!-- STEP 1: the stock / bond decision -->
+            <section class="opt-step" id="opt-step1">
+              <div class="opt-step__head">
+                <span class="opt-step__num">Step 1</span>
+                <h3 class="opt-step__title">Your stock / bond split</h3>
+              </div>
+              <p class="opt-step__intro">
+                The single biggest decision in retirement is how much to hold in stocks versus
+                bonds. This sweeps every split from all-bonds to all-stocks, runs each through the
+                same Monte Carlo engine, and shows where your success rate peaks. The winning split
+                is the <strong>most stock you can hold while still clearing your success floor</strong>.
+              </p>
+
+              <div class="opt-step1-proxies">
+                <div class="optimizer-field">
+                  <label class="field-label" for="opt-step1-equity">Stocks represented by</label>
+                  <select id="opt-step1-equity" class="select"></select>
+                </div>
+                <div class="opt-step1-proxies__vs" aria-hidden="true">vs.</div>
+                <div class="optimizer-field">
+                  <label class="field-label" for="opt-step1-fi">Bonds represented by</label>
+                  <select id="opt-step1-fi" class="select"></select>
+                </div>
+              </div>
+              <p class="field-note small">Uses your Simulator plan, your success floor, and your sims-per-portfolio setting from the Optimize-freely controls.</p>
+
+              <div class="optimizer-run-row">
+                <div id="opt-step1-preview" class="optimizer-preview" aria-live="polite"></div>
+                <button type="button" id="opt-step1-run" class="btn-primary" disabled>Find the split</button>
+              </div>
+              <p id="opt-step1-warning" class="field-warning" hidden></p>
+
+              <!-- Progress -->
+              <div id="opt-step1-progress" class="dev-progress optimizer-progress" hidden>
+                <p class="optimizer-progress__title">Running the model&hellip;</p>
+                <div class="dev-progress__bar"><div class="dev-progress__fill" id="opt-step1-progress-fill"></div></div>
+                <p class="dev-progress__label" id="opt-step1-progress-label">Simulating&hellip;</p>
+              </div>
+
+              <!-- Frontier chart + table -->
+              <div id="opt-step1-results" hidden>
+                <div class="chart-card opt-step1-chart-card">
+                  <div class="chart-card__head">
+                    <h3 class="chart-card__title">Success rate by stock / bond split</h3>
+                  </div>
+                  <div class="chart-container opt-step1-chart-container">
+                    <canvas id="opt-step1-chart"></canvas>
+                  </div>
+                  <p class="chart-card__note">Teal = chance of success · gold = median ending wealth (real) · dashed line = your success floor · dot = winning split.</p>
+                </div>
+                <div id="opt-step1-table" class="opt-step1-table-wrap"></div>
+                <div class="opt-step1-actions">
+                  <div id="opt-step1-winner-note" class="opt-step1-winner-note" aria-live="polite"></div>
+                  <button type="button" id="opt-step1-refine" class="btn-primary" disabled>Refine this split &rarr;</button>
+                </div>
+              </div>
+            </section>
+
+            <!-- STEP 2 mounts here in c18j -->
+            <section class="opt-step" id="opt-step2" hidden></section>
+
           </div>
         </section>
 

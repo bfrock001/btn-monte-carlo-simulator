@@ -1006,6 +1006,12 @@ const OPTIMIZER_STATE = {
   running: false,  // true while a batch is in flight
   lastRun: null,   // { points, plan, floorPct, N, step, elapsedMs, results }
   mode: 'free',    // 'free' (one-shot grid) | 'twostep' (stock/bond split → refine)
+  twostep: {
+    equityKey: null,       // Step-1 stock proxy
+    fiKey: null,           // Step-1 bond proxy
+    lockedEquityPct: null, // winning split (% stocks), locked into Step 2
+    running: false,        // true while a Step-1 sweep is in flight
+  },
 };
 
 const OPTIMIZER_STORAGE_KEY = 'btn-mcsim-optimizer-selection';
@@ -1241,6 +1247,7 @@ function initOptimizer() {
   });
 
   initOptimizerMode();
+  bindOptimizerTwoStep();
   initOptimizerAssetSelection();
   renderOptimizerControls();
 }
@@ -1280,10 +1287,329 @@ function applyOptimizerMode() {
   if (mode === 'twostep') renderOptimizerTwoStep();
 }
 
-// Two-step flow renderer. Step 1 (split frontier) lands in c18i, Step 2 (refine
-// within the locked split) in c18j. Stub for now.
+/* ============================================================
+   Two-step mode — Step 1: the stock / bond frontier (c18i)
+   ============================================================ */
+
+let optimizerStep1Chart = null;   // Chart.js instance for the split frontier
+let optimizerStep1Run = null;     // { points, plan, floorPct, N, equityKey, fiKey, start, end, winner, winnerEquityPct }
+
+const OPT_EQUITY_GROUPS = ['US Equity', 'International Equity'];
+const OPT_FI_GROUP = 'Fixed Income';
+const OPT_STEP1_SWEEP = 5;        // equity % increment across the frontier
+
+// Compact money for chart-axis ticks: $1.2M, $800k, $950.
+function optimizerMoneyShort(v) {
+  if (v == null || !isFinite(v)) return '';
+  const abs = Math.abs(v);
+  if (abs >= 1e6) return `$${(v / 1e6).toFixed(abs >= 1e7 ? 0 : 1)}M`;
+  if (abs >= 1e3) return `$${Math.round(v / 1e3)}k`;
+  return `$${Math.round(v)}`;
+}
+
+function optimizerAssetName(key) {
+  const a = STATE.assets.find((x) => x.key === key);
+  return a ? a.name : key;
+}
+
+// Assets in the given groups that have full data over [start,end].
+function optimizerCoveredInGroups(groups, start, end) {
+  return STATE.assets
+    .filter((a) => groups.includes(a.group) && optimizerAssetCoversPeriod(a.key, start, end))
+    .map((a) => ({ key: a.key, name: a.name }));
+}
+
+// One-time binding of the Step-1 controls (buttons/selects are static HTML).
+function bindOptimizerTwoStep() {
+  const eqSel = document.getElementById('opt-step1-equity');
+  const fiSel = document.getElementById('opt-step1-fi');
+  if (eqSel) eqSel.addEventListener('change', () => {
+    OPTIMIZER_STATE.twostep.equityKey = eqSel.value;
+    updateOptimizerStep1Preview();
+  });
+  if (fiSel) fiSel.addEventListener('change', () => {
+    OPTIMIZER_STATE.twostep.fiKey = fiSel.value;
+    updateOptimizerStep1Preview();
+  });
+  const runBtn = document.getElementById('opt-step1-run');
+  if (runBtn) runBtn.addEventListener('click', runOptimizerStep1);
+  const refineBtn = document.getElementById('opt-step1-refine');
+  if (refineBtn) refineBtn.addEventListener('click', enterOptimizerStep2);
+}
+
+// Two-step renderer (called on mode switch / tab show / asset change).
 function renderOptimizerTwoStep() {
-  /* populated in c18i / c18j */
+  populateOptimizerProxySelects();
+  updateOptimizerStep1Preview();
+  // Keep an existing frontier chart correctly sized when the tab re-shows.
+  const two = document.getElementById('optimizer-twostep');
+  if (optimizerStep1Chart && two && !two.hidden) optimizerStep1Chart.resize();
+}
+
+// Fill the equity / FI proxy dropdowns from covered assets, preserving the
+// current pick when still valid, else defaulting (Total US Market / Interm Treasury).
+function populateOptimizerProxySelects() {
+  const { plan } = getSimulatorPlanForOptimizer();
+  const [start, end] = optimizerPlanPeriodRange(plan);
+  const eqSel = document.getElementById('opt-step1-equity');
+  const fiSel = document.getElementById('opt-step1-fi');
+  if (!eqSel || !fiSel) return;
+
+  const fill = (sel, opts, preferred) => {
+    const prev = sel.value;
+    sel.innerHTML = '';
+    opts.forEach((o) => {
+      const el = document.createElement('option');
+      el.value = o.key; el.textContent = o.name;
+      sel.appendChild(el);
+    });
+    const keys = opts.map((o) => o.key);
+    const pick = keys.includes(prev) ? prev
+               : (preferred.find((k) => keys.includes(k)) || keys[0] || '');
+    sel.value = pick;
+    return pick;
+  };
+
+  OPTIMIZER_STATE.twostep.equityKey =
+    fill(eqSel, optimizerCoveredInGroups(OPT_EQUITY_GROUPS, start, end), ['total_market_us', 'sp500']);
+  OPTIMIZER_STATE.twostep.fiKey =
+    fill(fiSel, optimizerCoveredInGroups([OPT_FI_GROUP], start, end), ['interm_treasury', 'total_bond']);
+}
+
+// Build the split sweep: equity 0..100 by OPT_STEP1_SWEEP, each a 1- or 2-asset
+// allocation with non-zero weights only.
+function optimizerStep1Candidates(equityKey, fiKey) {
+  const out = [];
+  for (let e = 0; e <= 100; e += OPT_STEP1_SWEEP) {
+    if (e === 0)        out.push([{ key: fiKey, pct: 100 }]);
+    else if (e === 100) out.push([{ key: equityKey, pct: 100 }]);
+    else                out.push([{ key: equityKey, pct: e }, { key: fiKey, pct: 100 - e }]);
+  }
+  return out;
+}
+
+// % stocks for a split point (0 for the all-bonds point).
+function optimizerStep1EquityPct(point, equityKey) {
+  const hit = point.allocation.find((a) => a.key === equityKey);
+  return hit ? hit.pct : 0;
+}
+
+function updateOptimizerStep1Preview() {
+  const previewEl = document.getElementById('opt-step1-preview');
+  const warnEl = document.getElementById('opt-step1-warning');
+  const runBtn = document.getElementById('opt-step1-run');
+  if (!previewEl || !runBtn) return;
+
+  const { plan, hasSpending } = getSimulatorPlanForOptimizer();
+  const eqKey = OPTIMIZER_STATE.twostep.equityKey;
+  const fiKey = OPTIMIZER_STATE.twostep.fiKey;
+  const nSplits = Math.floor(100 / OPT_STEP1_SWEEP) + 1;
+
+  let warn = '';
+  let canRun = true;
+  if (!hasSpending) { canRun = false; }         // gate message shows via #optimizer-plan
+  else if (!eqKey || !fiKey) {
+    canRun = false;
+    warn = 'Need a stock proxy and a bond proxy with full data over your plan period.';
+  }
+
+  if (!hasSpending) {
+    previewEl.textContent = '';
+  } else {
+    const estMs = nSplits * OPTIMIZER_STATE.simsPerCandidate * plan.period_years *
+                  OPTIMIZER_MS_PER_SIM_YEAR / OPTIMIZER_STATE.poolSize;
+    const estStr = estMs < 1000 ? '~1s' : `~${Math.round(estMs / 1000)}s`;
+    previewEl.innerHTML =
+      `<strong>${nSplits}</strong> splits · <span class="optimizer-preview__est">${estStr} on ${OPTIMIZER_STATE.poolSize} core${OPTIMIZER_STATE.poolSize === 1 ? '' : 's'} · ${OPTIMIZER_STATE.simsPerCandidate.toLocaleString('en-US')} sims each</span>`;
+  }
+  if (warnEl) { warnEl.hidden = warn === ''; warnEl.textContent = warn; }
+  runBtn.disabled = OPTIMIZER_STATE.twostep.running || !canRun;
+}
+
+function setOptimizerStep1Busy(busy) {
+  const btn = document.getElementById('opt-step1-run');
+  const prog = document.getElementById('opt-step1-progress');
+  if (btn)  { btn.disabled = busy; btn.textContent = busy ? 'Finding…' : 'Find the split'; }
+  if (prog) prog.hidden = !busy;
+}
+
+function optimizerStep1Progress(done, total) {
+  const fill = document.getElementById('opt-step1-progress-fill');
+  const label = document.getElementById('opt-step1-progress-label');
+  if (fill) fill.style.width = `${total ? Math.min(100, (done / total) * 100) : 0}%`;
+  if (label) label.textContent =
+    `Simulating every split in your browser — ${done.toLocaleString('en-US')} / ${total.toLocaleString('en-US')}`;
+}
+
+function runOptimizerStep1() {
+  if (OPTIMIZER_STATE.running || OPTIMIZER_STATE.twostep.running) return;
+  const { plan, hasSpending } = getSimulatorPlanForOptimizer();
+  if (!hasSpending) return;
+  const [start, end] = optimizerPlanPeriodRange(plan);
+  const equityKey = OPTIMIZER_STATE.twostep.equityKey;
+  const fiKey = OPTIMIZER_STATE.twostep.fiKey;
+  if (!equityKey || !fiKey) return;
+
+  const candidates = optimizerStep1Candidates(equityKey, fiKey);
+  const floorPct = OPTIMIZER_STATE.floorPct;
+  const N = OPTIMIZER_STATE.simsPerCandidate;
+  const total = candidates.length;
+
+  OPTIMIZER_STATE.twostep.running = true;
+  setOptimizerStep1Busy(true);
+  const refineBtn = document.getElementById('opt-step1-refine');
+  if (refineBtn) refineBtn.disabled = true;
+  optimizerStep1Progress(0, total);
+  const startedAt = performance.now();
+
+  runOptimizeBatch(candidates, plan, N, { onProgress: optimizerStep1Progress })
+    .then((points) => {
+      OPTIMIZER_STATE.twostep.running = false;
+      setOptimizerStep1Busy(false);
+      finishOptimizerStep1(points, { plan, floorPct, N, equityKey, fiKey, start, end,
+                                     elapsedMs: performance.now() - startedAt });
+    })
+    .catch((err) => {
+      OPTIMIZER_STATE.twostep.running = false;
+      setOptimizerStep1Busy(false);
+      const warnEl = document.getElementById('opt-step1-warning');
+      if (warnEl) { warnEl.hidden = false; warnEl.textContent = (err && err.message) || 'The engine reported an error.'; }
+    });
+}
+
+function finishOptimizerStep1(points, ctx) {
+  const { plan, floorPct, N, equityKey, fiKey, start, end } = ctx;
+  // Winner = max real median CAGR among splits clearing the floor (same objective
+  // as free mode). computeOptimizerResults also tags meets_floor / on_frontier.
+  const res = computeOptimizerResults(points, floorPct);
+  const winner = res.best || res.closest || null;
+  const winnerEquityPct = winner ? optimizerStep1EquityPct(winner, equityKey) : null;
+
+  optimizerStep1Run = { points, plan, floorPct, N, equityKey, fiKey, start, end, winner, winnerEquityPct };
+  OPTIMIZER_STATE.twostep.lockedEquityPct = winnerEquityPct;
+
+  const results = document.getElementById('opt-step1-results');
+  if (results) results.hidden = false;
+  renderOptimizerStep1Chart(optimizerStep1Run);
+  renderOptimizerStep1Table(optimizerStep1Run);
+
+  const note = document.getElementById('opt-step1-winner-note');
+  const refineBtn = document.getElementById('opt-step1-refine');
+  const eqName = optimizerAssetName(equityKey);
+  const fiName = optimizerAssetName(fiKey);
+  if (winner && res.best) {
+    if (note) note.innerHTML =
+      `Winning split: <strong>${winnerEquityPct}% ${escapeHtml(eqName)} / ${100 - winnerEquityPct}% ${escapeHtml(fiName)}</strong>` +
+      ` — ${winner.success_rate_pct.toFixed(1)}% success, ${winner.cagr_real_median.toFixed(2)}% real CAGR.`;
+    if (refineBtn) refineBtn.disabled = false;
+  } else if (winner) {
+    if (note) note.innerHTML =
+      `No split clears your ${floorPct}% floor. Closest is <strong>${winnerEquityPct}% ${escapeHtml(eqName)} / ${100 - winnerEquityPct}% ${escapeHtml(fiName)}</strong>` +
+      ` at ${winner.success_rate_pct.toFixed(1)}% success — lower your floor or extend the data range.`;
+    if (refineBtn) refineBtn.disabled = false;
+  } else {
+    if (note) note.textContent = 'No valid splits — check your plan and data range.';
+    if (refineBtn) refineBtn.disabled = true;
+  }
+}
+
+function renderOptimizerStep1Chart(run) {
+  const canvas = document.getElementById('opt-step1-chart');
+  if (!canvas || typeof Chart === 'undefined') return;
+  const css = (n, f) => (getComputedStyle(document.documentElement).getPropertyValue(n).trim() || f);
+  const teal = css('--teal', '#1A6E6E');
+  const gold = css('--gold', '#B58820');
+  const clay = css('--clay', '#C84A30');
+  const navy = css('--navy', '#1F3D6B');
+
+  const pts = [...run.points].sort((a, b) =>
+    optimizerStep1EquityPct(a, run.equityKey) - optimizerStep1EquityPct(b, run.equityKey));
+  const eq = (p) => optimizerStep1EquityPct(p, run.equityKey);
+  const successData = pts.map((p) => ({ x: eq(p), y: p.success_rate_pct }));
+  const wealthData  = pts.map((p) => ({ x: eq(p), y: p.ending_wealth_real }));
+  const floorData   = [{ x: 0, y: run.floorPct }, { x: 100, y: run.floorPct }];
+
+  const wePct = run.winnerEquityPct;
+  const ptRadius = pts.map((p) => (eq(p) === wePct ? 6 : 2.5));
+  const ptColor  = pts.map((p) => (eq(p) === wePct ? navy : teal));
+
+  if (optimizerStep1Chart) optimizerStep1Chart.destroy();
+  optimizerStep1Chart = new Chart(canvas.getContext('2d'), {
+    type: 'line',
+    data: {
+      datasets: [
+        { label: 'Success rate', data: successData, borderColor: teal, backgroundColor: teal,
+          yAxisID: 'y', tension: 0.25, pointRadius: ptRadius, pointBackgroundColor: ptColor,
+          pointBorderColor: ptColor, order: 1 },
+        { label: 'Median ending (real)', data: wealthData, borderColor: gold, backgroundColor: gold,
+          yAxisID: 'y1', tension: 0.25, pointRadius: 0, order: 2 },
+        { label: `Success floor (${run.floorPct}%)`, data: floorData, borderColor: clay, backgroundColor: clay,
+          yAxisID: 'y', pointRadius: 0, borderDash: [6, 4], borderWidth: 1.5, order: 0 },
+      ],
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      interaction: { mode: 'nearest', intersect: false },
+      scales: {
+        x: { type: 'linear', min: 0, max: 100,
+             title: { display: true, text: '% in stocks' },
+             ticks: { callback: (v) => `${v}%`, stepSize: 20 } },
+        y: { position: 'left', min: 0, max: 100,
+             title: { display: true, text: 'Chance of success' },
+             ticks: { callback: (v) => `${v}%` } },
+        y1: { position: 'right', grid: { drawOnChartArea: false },
+              title: { display: true, text: 'Median ending (real)' },
+              ticks: { callback: (v) => optimizerMoneyShort(v) } },
+      },
+      plugins: {
+        legend: { display: true, position: 'bottom' },
+        tooltip: { callbacks: {
+          title: (items) => `${items[0].parsed.x}% stocks / ${100 - items[0].parsed.x}% bonds`,
+          label: (item) => {
+            if (item.dataset.yAxisID === 'y1') return `Median ending (real): ${formatCurrency(item.parsed.y)}`;
+            if (item.dataset.label.startsWith('Success floor')) return item.dataset.label;
+            return `Success: ${item.parsed.y.toFixed(1)}%`;
+          },
+        } },
+      },
+    },
+  });
+}
+
+function renderOptimizerStep1Table(run) {
+  const wrap = document.getElementById('opt-step1-table');
+  if (!wrap) return;
+  const eqName = optimizerAssetName(run.equityKey);
+  const fiName = optimizerAssetName(run.fiKey);
+  const pts = [...run.points].sort((a, b) =>
+    optimizerStep1EquityPct(a, run.equityKey) - optimizerStep1EquityPct(b, run.equityKey));
+
+  let html =
+    `<table class="opt-step1-table"><thead><tr>` +
+    `<th>Split (stocks / bonds)</th><th>Success</th><th>Real median CAGR</th>` +
+    `<th>Median ending (real)</th><th>Volatility</th></tr></thead><tbody>`;
+  pts.forEach((p) => {
+    const e = optimizerStep1EquityPct(p, run.equityKey);
+    const vol = portfolioAnnualVol(p.allocation, run.start, run.end);
+    const isWinner = e === run.winnerEquityPct;
+    const clears = p.success_rate_pct >= run.floorPct;
+    html +=
+      `<tr class="${isWinner ? 'is-winner' : ''}">` +
+      `<td>${e}% stocks / ${100 - e}% bonds</td>` +
+      `<td class="${clears ? 'clears' : ''}">${p.success_rate_pct.toFixed(1)}%</td>` +
+      `<td>${p.cagr_real_median != null ? p.cagr_real_median.toFixed(2) + '%' : '—'}</td>` +
+      `<td>${formatCurrency(p.ending_wealth_real)}</td>` +
+      `<td>${vol != null ? vol.toFixed(1) + '%' : '—'}</td>` +
+      `</tr>`;
+  });
+  html += `</tbody></table>`;
+  html += `<p class="field-note small">Stocks = ${escapeHtml(eqName)} · Bonds = ${escapeHtml(fiName)}. Winner (highlighted) = the highest real median CAGR that still clears your ${run.floorPct}% floor.</p>`;
+  wrap.innerHTML = html;
+}
+
+// Step 2 entry point — implemented in c18j.
+function enterOptimizerStep2() {
+  /* implemented in c18j */
 }
 
 // Rebuild the parts of Tool 4 that depend on the shared selection or the

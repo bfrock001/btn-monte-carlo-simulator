@@ -3536,3 +3536,115 @@ em { font-style: italic; }
   color: var(--soft);
 }
 .optimizer-twostep { margin-top: 2px; }
+
+/* ---- Two-step: shared step scaffolding ---- */
+.opt-step {
+  margin: 0 0 26px;
+  padding: 18px 18px 20px;
+  border: 1px solid rgba(31, 61, 107, 0.14);
+  border-radius: 8px;
+  background: rgba(31, 61, 107, 0.02);
+}
+.opt-step__head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+.opt-step__num {
+  font-family: var(--font-sans);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--paper);
+  background: var(--navy);
+  padding: 3px 8px;
+  border-radius: 3px;
+}
+.opt-step__title {
+  font-family: var(--font-serif, Georgia, serif);
+  font-size: 19px;
+  font-weight: 600;
+  color: var(--ink);
+  margin: 0;
+}
+.opt-step__intro {
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: var(--soft);
+  margin: 0 0 16px;
+  max-width: 68ch;
+}
+.opt-step__intro strong { color: var(--ink); }
+
+/* ---- Step 1: proxy pickers ---- */
+.opt-step1-proxies {
+  display: flex;
+  align-items: flex-end;
+  gap: 14px;
+  flex-wrap: wrap;
+  margin-bottom: 6px;
+}
+.opt-step1-proxies .optimizer-field { flex: 1 1 220px; }
+.opt-step1-proxies__vs {
+  font-size: 13px;
+  color: var(--soft);
+  padding-bottom: 9px;
+}
+
+/* ---- Step 1: frontier chart ---- */
+.opt-step1-chart-card { margin-top: 18px; }
+.opt-step1-chart-container {
+  position: relative;
+  height: 340px;
+  width: 100%;
+}
+
+/* ---- Step 1: per-split table ---- */
+.opt-step1-table-wrap { margin-top: 16px; overflow-x: auto; }
+.opt-step1-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.opt-step1-table thead th {
+  text-align: right;
+  font-weight: 600;
+  color: var(--soft);
+  border-bottom: 1.5px solid rgba(31, 61, 107, 0.18);
+  padding: 7px 10px;
+  white-space: nowrap;
+}
+.opt-step1-table thead th:first-child { text-align: left; }
+.opt-step1-table tbody td {
+  text-align: right;
+  padding: 6px 10px;
+  border-bottom: 1px solid rgba(31, 61, 107, 0.07);
+  font-variant-numeric: tabular-nums;
+}
+.opt-step1-table tbody td:first-child { text-align: left; }
+.opt-step1-table tbody tr.is-winner {
+  background: rgba(31, 61, 107, 0.08);
+  font-weight: 600;
+}
+.opt-step1-table tbody tr.is-winner td:first-child {
+  box-shadow: inset 3px 0 0 var(--navy);
+}
+.opt-step1-table td.clears { color: var(--teal); }
+
+/* ---- Step 1: winner note + refine action ---- */
+.opt-step1-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-top: 18px;
+}
+.opt-step1-winner-note {
+  font-size: 13.5px;
+  color: var(--ink);
+  flex: 1 1 320px;
+}
+.opt-step1-winner-note strong { color: var(--navy); }
