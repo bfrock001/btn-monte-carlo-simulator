@@ -974,12 +974,14 @@ const OPTIMIZER_STEP_OPTIONS  = [5, 10, 20, 25];
 const OPTIMIZER_SIMS_OPTIONS  = [1000, 2000, 5000];
 const OPTIMIZER_CANDIDATE_CAP  = 2000;   // hard block above this many portfolios
 const OPTIMIZER_CANDIDATE_WARN = 800;    // soft warning above this many
-// Rough per-sim-year cost (ms) used only for the runtime estimate. Tuned
-// against the worker's reported runtime_ms in Phase 2; intentionally a little
-// conservative so the estimate over- rather than under-promises.
-const OPTIMIZER_MS_PER_SIM_YEAR = 0.0009;
-// Flipped true in Phase 2 once the worker "optimize" path + orchestrator exist.
-const OPTIMIZER_ENGINE_READY = false;
+// Rough per-sim-year cost (ms) used only for the runtime estimate. Calibrated
+// against measured throughput (~0.0002 ms/sim-year/core: 1,001 portfolios ×
+// 1,000 sims × 30 yr ≈ 1.5s on 4 cores). Nudged up slightly so the estimate
+// over- rather than under-promises, and it absorbs per-candidate + worker-startup
+// overhead on smaller runs.
+const OPTIMIZER_MS_PER_SIM_YEAR = 0.00025;
+// The worker "optimize" path + pool orchestrator exist as of Phase 2.
+const OPTIMIZER_ENGINE_READY = true;
 
 const OPTIMIZER_STRATEGY_LABELS = {
   none:             'Fixed expense schedule',
@@ -997,6 +999,8 @@ const OPTIMIZER_STATE = {
   caps: {},        // key -> { min: number|null, max: number|null } in whole %
   lastCount: 0,    // candidate count from the most recent preview
   poolSize: Math.max(1, Math.min(navigator.hardwareConcurrency || 4, 4)),
+  running: false,  // true while a batch is in flight
+  lastRun: null,   // { points, plan, floorPct, N, step, elapsedMs, results }
 };
 
 // One-time setup: build the static selects, seed defaults, bind events.
@@ -1042,6 +1046,9 @@ function initOptimizer() {
       floorInput.value = String(OPTIMIZER_STATE.floorPct);
     });
   }
+
+  const runBtn = document.getElementById('optimizer-run');
+  if (runBtn) runBtn.addEventListener('click', runOptimizer);
 
   renderOptimizerControls();
 }
@@ -1307,11 +1314,288 @@ function updateOptimizerPreview() {
 function updateOptimizerRunState({ keys, hasSpending, count, exceeded, feasible }) {
   const btn = document.getElementById('optimizer-run');
   if (!btn) return;
+  if (OPTIMIZER_STATE.running) { btn.disabled = true; return; }
   const floorValid = OPTIMIZER_STATE.floorPct >= 0 && OPTIMIZER_STATE.floorPct <= 100;
   const configValid = hasSpending && keys.length >= 2 && feasible && !exceeded &&
                       count >= 1 && count <= OPTIMIZER_CANDIDATE_CAP && floorValid;
   btn.disabled = !configValid || !OPTIMIZER_ENGINE_READY;
   btn.title = OPTIMIZER_ENGINE_READY ? '' : 'Optimization engine arrives in the next update.';
+}
+
+/* ---- Constrained-grid enumeration (allocations) ----
+   Same walk as countGridCompositions, but emits each composition as an
+   allocation array [{key, pct}] filtered to non-zero weights — a 0% asset must
+   not be sent to the worker, or buildEligibleRows would still require its data
+   and needlessly shrink the eligible-year pool. */
+function enumerateGridCompositions(keys, step, capCount) {
+  const k = keys.length;
+  const { m, lo, hi } = optimizerUnitBounds(keys, step);
+  for (let i = 0; i < k; i++) if (lo[i] > hi[i]) return [];
+  const sufLo = new Array(k + 1).fill(0);
+  const sufHi = new Array(k + 1).fill(0);
+  for (let i = k - 1; i >= 0; i--) {
+    sufLo[i] = sufLo[i + 1] + lo[i];
+    sufHi[i] = sufHi[i + 1] + hi[i];
+  }
+  if (sufLo[0] > m || sufHi[0] < m) return [];
+
+  const out = [];
+  const units = new Array(k);
+  function rec(i, remaining) {
+    if (out.length > capCount) return; // safety guard; caller checks the cap first
+    if (i === k) {
+      if (remaining === 0) {
+        const alloc = [];
+        for (let j = 0; j < k; j++) {
+          if (units[j] > 0) alloc.push({ key: keys[j], pct: units[j] * step });
+        }
+        out.push(alloc);
+      }
+      return;
+    }
+    const lowU  = Math.max(lo[i], remaining - sufHi[i + 1]);
+    const highU = Math.min(hi[i], remaining - sufLo[i + 1]);
+    for (let u = lowU; u <= highU; u++) {
+      units[i] = u;
+      rec(i + 1, remaining - u);
+    }
+  }
+  rec(0, m);
+  return out;
+}
+
+/* ---- Run orchestration: worker pool over candidate slices ---- */
+function runOptimizer() {
+  if (OPTIMIZER_STATE.running) return;
+  const keys = optimizerSelectedKeys();
+  const { plan, hasSpending } = getSimulatorPlanForOptimizer();
+  if (!hasSpending || keys.length < 2) return;
+
+  const step = OPTIMIZER_STATE.step;
+  const candidates = enumerateGridCompositions(keys, step, OPTIMIZER_CANDIDATE_CAP);
+  if (candidates.length === 0 || candidates.length > OPTIMIZER_CANDIDATE_CAP) return;
+
+  const floorPct = OPTIMIZER_STATE.floorPct;
+  const N = OPTIMIZER_STATE.simsPerCandidate;
+  const total = candidates.length;
+
+  // Split into contiguous slices, one per pooled worker.
+  const poolSize = Math.max(1, Math.min(OPTIMIZER_STATE.poolSize, total));
+  const sliceSize = Math.ceil(total / poolSize);
+  const slices = [];
+  for (let i = 0; i < total; i += sliceSize) slices.push(candidates.slice(i, i + sliceSize));
+  const target = slices.length;
+
+  OPTIMIZER_STATE.running = true;
+  setOptimizerBusy(true);
+  hideElement('optimizer-empty');
+  optimizerUpdateProgress(0, total);
+
+  const results  = new Array(target);
+  const doneByWk = new Array(target).fill(0);
+  const workers  = [];
+  let finished = 0;
+  let aborted = false;
+  const startedAt = performance.now();
+  const cleanup = () => workers.forEach((w) => { try { w.terminate(); } catch {} });
+
+  slices.forEach((slice, wi) => {
+    let w;
+    try {
+      w = new Worker('./simulation.worker.js');
+    } catch (e) {
+      aborted = true;
+      cleanup();
+      OPTIMIZER_STATE.running = false;
+      setOptimizerBusy(false);
+      showOptimizerError('Could not start the optimization workers. Your browser may not support Web Workers.');
+      return;
+    }
+    workers.push(w);
+    w.onmessage = (e) => {
+      if (aborted) return;
+      const m = e.data || {};
+      if (m.type === 'optimize_progress') {
+        doneByWk[wi] = m.done;
+        let done = 0; for (const d of doneByWk) done += d;
+        optimizerUpdateProgress(done, total);
+      } else if (m.type === 'optimize_results') {
+        results[wi] = m.points;
+        finished++;
+        if (finished === target) {
+          cleanup();
+          const points = results.flat();
+          finishOptimizer(points, plan, floorPct, N, step, performance.now() - startedAt);
+        }
+      } else if (m.type === 'optimize_error') {
+        aborted = true;
+        cleanup();
+        OPTIMIZER_STATE.running = false;
+        setOptimizerBusy(false);
+        showOptimizerError(m.message || 'The optimization engine reported an error.');
+      }
+    };
+    w.onerror = (err) => {
+      if (aborted) return;
+      aborted = true;
+      cleanup();
+      OPTIMIZER_STATE.running = false;
+      setOptimizerBusy(false);
+      showOptimizerError((err && err.message) || 'Optimization worker error.');
+    };
+    w.postMessage({ type: 'optimize', plan, candidates: slice, simsPerCandidate: N, data: STATE.data });
+  });
+}
+
+function finishOptimizer(points, plan, floorPct, N, step, elapsedMs) {
+  OPTIMIZER_STATE.running = false;
+  setOptimizerBusy(false);
+  const res = computeOptimizerResults(points, floorPct);
+  OPTIMIZER_STATE.lastRun = { points, plan, floorPct, N, step, elapsedMs, results: res };
+  renderOptimizerResults(res, { plan, floorPct, N, step, elapsedMs, total: points.length });
+  updateOptimizerPreview(); // restore run-button enabled state
+}
+
+// Identify the winning portfolio + the Pareto-efficient frontier, and tag every
+// point with meets_floor / on_frontier. "Best" = max real median CAGR among
+// points clearing the success floor; if none clear it, expose the closest (the
+// highest success rate achieved).
+function computeOptimizerResults(points, floorPct) {
+  const valid = points.filter((p) => !p.invalid && p.cagr_real_median != null && Number.isFinite(p.cagr_real_median));
+
+  let best = null;
+  let closest = null;
+  const clearing = valid.filter((p) => p.success_rate_pct >= floorPct);
+  if (clearing.length) {
+    best = clearing.reduce((a, b) => (b.cagr_real_median > a.cagr_real_median ? b : a));
+  } else if (valid.length) {
+    // Highest success rate; tie-break on real median CAGR.
+    closest = valid.reduce((a, b) => {
+      if (b.success_rate_pct !== a.success_rate_pct) return b.success_rate_pct > a.success_rate_pct ? b : a;
+      return b.cagr_real_median > a.cagr_real_median ? b : a;
+    });
+  }
+
+  // Pareto frontier: a point is efficient if no other valid point has both
+  // success ≥ and real median CAGR ≥, with at least one strictly greater.
+  const frontier = valid.filter((p) => !valid.some((q) =>
+    q !== p &&
+    q.success_rate_pct  >= p.success_rate_pct &&
+    q.cagr_real_median  >= p.cagr_real_median &&
+    (q.success_rate_pct > p.success_rate_pct || q.cagr_real_median > p.cagr_real_median)
+  ));
+  const frontierSet = new Set(frontier);
+
+  points.forEach((p) => {
+    p.meets_floor = !p.invalid && p.cagr_real_median != null && p.success_rate_pct >= floorPct;
+    p.on_frontier = frontierSet.has(p);
+  });
+
+  // Frontier sorted by success ascending (natural left→right for the future chart).
+  frontier.sort((a, b) => a.success_rate_pct - b.success_rate_pct || a.cagr_real_median - b.cagr_real_median);
+
+  const invalidCount = points.length - valid.length;
+  return { best, closest, frontier, validCount: valid.length, invalidCount };
+}
+
+/* ---- Run-state UI helpers ---- */
+function setOptimizerBusy(busy) {
+  const btn  = document.getElementById('optimizer-run');
+  const prog = document.getElementById('optimizer-progress');
+  if (btn)  { btn.disabled = busy; btn.textContent = busy ? 'Optimizing…' : 'Run optimizer'; }
+  if (prog) prog.hidden = !busy;
+}
+
+function optimizerUpdateProgress(done, total) {
+  const fill  = document.getElementById('optimizer-progress-fill');
+  const label = document.getElementById('optimizer-progress-label');
+  if (fill)  fill.style.width = `${total ? Math.min(100, (done / total) * 100) : 0}%`;
+  if (label) label.textContent =
+    `Optimizing… ${done.toLocaleString('en-US')} / ${total.toLocaleString('en-US')} portfolios`;
+}
+
+function showOptimizerError(message) {
+  const empty = document.getElementById('optimizer-empty');
+  if (empty) { empty.hidden = false; empty.textContent = message; }
+  const prog = document.getElementById('optimizer-progress');
+  if (prog) prog.hidden = true;
+}
+
+/* ---- Results rendering (Phase 2: best callout + frontier table) ---- */
+function optimizerAllocationSummary(alloc) {
+  const byKey = new Map(STATE.assets.map((a) => [a.key, a]));
+  return [...alloc]
+    .sort((a, b) => b.pct - a.pct)
+    .map((a) => `${a.pct}% ${escapeHtml((byKey.get(a.key) || {}).name || a.key)}`)
+    .join(' · ');
+}
+
+function optimizerFmtPct(v, d = 1) { return v == null ? '—' : `${v.toFixed(d)}%`; }
+
+function renderOptimizerResults(res, meta) {
+  const box = document.getElementById('optimizer-results');
+  if (!box) return;
+  box.hidden = false;
+
+  const { best, closest, frontier, validCount, invalidCount } = res;
+  const { floorPct, N, step, elapsedMs, total } = meta;
+
+  // Headline: winner or closest-miss.
+  let headline;
+  if (best) {
+    headline =
+      `<div class="optimizer-best">` +
+        `<p class="optimizer-best__label">Best portfolio clearing ${optimizerFmtPct(floorPct, 0)} success</p>` +
+        `<p class="optimizer-best__alloc">${optimizerAllocationSummary(best.allocation)}</p>` +
+        `<div class="optimizer-best__stats">` +
+          statPill('Success', optimizerFmtPct(best.success_rate_pct)) +
+          statPill('Real median CAGR', optimizerFmtPct(best.cagr_real_median, 2)) +
+          statPill('Median ending (real)', formatCurrency(Math.round(best.ending_wealth_real))) +
+        `</div>` +
+      `</div>`;
+  } else if (closest) {
+    headline =
+      `<div class="optimizer-best optimizer-best--miss">` +
+        `<p class="optimizer-best__label">No portfolio cleared ${optimizerFmtPct(floorPct, 0)} success</p>` +
+        `<p class="optimizer-best__alloc">Closest: ${optimizerAllocationSummary(closest.allocation)}</p>` +
+        `<div class="optimizer-best__stats">` +
+          statPill('Best success', optimizerFmtPct(closest.success_rate_pct)) +
+          statPill('Real median CAGR', optimizerFmtPct(closest.cagr_real_median, 2)) +
+          statPill('Median ending (real)', formatCurrency(Math.round(closest.ending_wealth_real))) +
+        `</div>` +
+        `<p class="field-note small">Lower your success floor, allow more equity, or extend the data range.</p>` +
+      `</div>`;
+  } else {
+    headline = `<div class="optimizer-best optimizer-best--miss"><p class="optimizer-best__label">No valid portfolios — none of the candidates had data over your plan’s period.</p></div>`;
+  }
+
+  // Frontier table.
+  let table = '';
+  if (frontier.length) {
+    const rows = frontier.map((p) => {
+      const isBest = p === best;
+      return `<tr class="${isBest ? 'is-best' : ''}${p.meets_floor ? '' : ' is-belowfloor'}">` +
+        `<td class="optimizer-rt__alloc">${optimizerAllocationSummary(p.allocation)}${isBest ? ' <span class="optimizer-tag">best</span>' : ''}</td>` +
+        `<td class="num">${optimizerFmtPct(p.success_rate_pct)}</td>` +
+        `<td class="num">${optimizerFmtPct(p.cagr_real_mean, 2)}</td>` +
+        `<td class="num">${optimizerFmtPct(p.cagr_real_median, 2)}</td>` +
+        `<td class="num">${formatCurrency(Math.round(p.ending_wealth_real))}</td>` +
+      `</tr>`;
+    }).join('');
+    table =
+      `<div class="optimizer-rt-head">Efficient frontier <span class="field-note small">— ${frontier.length} non-dominated portfolio${frontier.length === 1 ? '' : 's'} (success ↑, real median CAGR ↑). Rows below your floor are dimmed.</span></div>` +
+      `<div class="table-wrap"><table class="optimizer-rt"><thead><tr>` +
+        `<th>Allocation</th><th class="num">Success</th><th class="num">Avg CAGR (real)</th><th class="num">Median CAGR (real)</th><th class="num">Median ending (real)</th>` +
+      `</tr></thead><tbody>${rows}</tbody></table></div>`;
+  }
+
+  const meta1 = `<p class="optimizer-meta field-note small">Ran <strong>${total.toLocaleString('en-US')}</strong> portfolios × ${N.toLocaleString('en-US')} sims in ${(elapsedMs / 1000).toFixed(1)}s · ${step}% weight grid${invalidCount ? ` · ${invalidCount} skipped (no data in period)` : ''}.</p>`;
+
+  box.innerHTML = headline + table + meta1;
+}
+
+function statPill(label, value) {
+  return `<span class="optimizer-stat"><span class="optimizer-stat__label">${label}</span><span class="optimizer-stat__value">${value}</span></span>`;
 }
 
 /* -----------------------------------------------------------

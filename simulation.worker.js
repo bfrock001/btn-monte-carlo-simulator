@@ -26,6 +26,7 @@ const PERIOD_DEFS = {
 
 self.onmessage = (e) => {
   const msg = e.data || {};
+  if (msg.type === 'optimize') { runOptimize(msg); return; }
   if (msg.type !== 'run') return;
   try {
     const startedAt = Date.now();
@@ -1311,4 +1312,199 @@ function pearson(x, y) {
   }
   const den = Math.sqrt(dx2 * dy2);
   return den > 0 ? num / den : null;
+}
+
+/* ============================================================
+   Optimizer path — slim batch runner (Tool 4)
+   ------------------------------------------------------------
+   Given a fixed retirement plan (everything the Simulator sends except
+   allocations) and a batch of candidate allocations, run each candidate
+   through the SAME engine (buildEligibleRows + runOneSim) and return only
+   the handful of fields the optimizer needs. Reusing runOneSim verbatim
+   guarantees each candidate's numbers match what the Simulator would report
+   for that exact portfolio — no duplicated withdrawal/strategy math.
+
+   Message in:  { type:'optimize', plan, candidates, simsPerCandidate, data }
+     - plan.period_years / distribution_strategy / strategy_params / buckets /
+       income / historical_period … all as the Simulator builds them.
+     - candidates: array of allocation arrays [{key,pct}], each summing to 100,
+       already filtered to non-zero weights (so a 0% asset never shrinks the
+       eligible-year pool).
+   Messages out: { type:'optimize_progress', done, total }
+                 { type:'optimize_results', points }   // one point per candidate
+                 { type:'optimize_error', message }
+   ============================================================ */
+function runOptimize(msg) {
+  try {
+    const plan = msg.plan;
+    const data = msg.data;
+    const candidates = msg.candidates || [];
+    const N = msg.simsPerCandidate;
+    const Y = plan.period_years;
+    const strategy = plan.distribution_strategy || 'none';
+
+    // Resolve strategy params once (same defaults as runSimulation).
+    const sp = plan.strategy_params || {};
+    const fallbackAdj = sp.adjustment_pct != null ? sp.adjustment_pct : 10.0;
+    const strat = {
+      realSpendingDeclinePct: sp.real_spending_decline_pct != null ? sp.real_spending_decline_pct : 2.0,
+      upperGuardrailPct:      sp.upper_guardrail_pct      != null ? sp.upper_guardrail_pct      : 6.0,
+      lowerGuardrailPct:      sp.lower_guardrail_pct      != null ? sp.lower_guardrail_pct      : 4.0,
+      gkUpperAdjustmentPct:   sp.upper_adjustment_pct     != null ? sp.upper_adjustment_pct     : fallbackAdj,
+      gkLowerAdjustmentPct:   sp.lower_adjustment_pct     != null ? sp.lower_adjustment_pct     : fallbackAdj,
+      vdsCeilingPct:          sp.vds_ceiling_pct          != null ? sp.vds_ceiling_pct          : 5.0,
+      vdsFloorPct:            sp.vds_floor_pct            != null ? sp.vds_floor_pct            : 2.5,
+    };
+
+    const buffers = allocateOptimizeBuffers(N, Y);
+    const points = new Array(candidates.length);
+    let lastPost = 0;
+
+    for (let c = 0; c < candidates.length; c++) {
+      let stats;
+      try {
+        stats = runOptimizeCandidate(plan, candidates[c], N, Y, data, buffers, strategy, strat);
+      } catch (err) {
+        stats = { invalid: true, reason: (err && err.message) ? err.message : String(err) };
+      }
+      points[c] = Object.assign({ allocation: candidates[c] }, stats);
+
+      if (c + 1 - lastPost >= 8 || c + 1 === candidates.length) {
+        lastPost = c + 1;
+        self.postMessage({ type: 'optimize_progress', done: c + 1, total: candidates.length });
+      }
+    }
+
+    self.postMessage({ type: 'optimize_results', points });
+  } catch (err) {
+    self.postMessage({ type: 'optimize_error', message: (err && err.message) ? err.message : String(err) });
+  }
+}
+
+// Reusable typed-array scratch space, allocated once per worker batch and
+// overwritten in place by each candidate's N simulations.
+function allocateOptimizeBuffers(N, Y) {
+  return {
+    nominalBalances:        new Float64Array(N * (Y + 1)),
+    realBalances:           new Float64Array(N * (Y + 1)),
+    annualReturnsPct:       new Float64Array(N * Y),
+    tbillReturnsPct:        new Float64Array(N * Y),
+    inflationsPct:          new Float64Array(N * Y),
+    cumInflationIdx:        new Float64Array(N * Y),
+    withdrawalByYear:       new Float64Array(N * Y),
+    depletedFlags:          new Uint8Array(N),
+    depletionYears:         new Int16Array(N),
+    initialWithdrawalRates: new Float64Array(N),
+    floorBindingCounts:     new Int16Array(N),
+    gkEvents:               new Array(N),
+    vdsEvents:              new Array(N),
+    // drawnInflation / drawnStockReturn sink — never written because we pass
+    // correlationAssetKey=null (the correlation diagnostic is skipped here).
+    emptyArr:               [],
+  };
+}
+
+function runOptimizeCandidate(plan, allocation, N, Y, data, b, strategy, strat) {
+  const inputs = Object.assign({}, plan, { allocations: allocation, n_simulations: N });
+  const eligibleRows = buildEligibleRows(inputs, data);
+  if (eligibleRows.length === 0) return { invalid: true, reason: 'no_data_in_period' };
+
+  // Sequence-of-returns mode — identical logic to runSimulation, but fall back
+  // to computed_worst rather than throwing if 2008 is unavailable.
+  let sorMode = 'inactive';
+  let sor2008Row = null;
+  if (inputs.sequence_of_returns) {
+    sorMode = inputs.sor_force_2008 ? 'forced_2008' : 'computed_worst';
+    if (sorMode === 'forced_2008') {
+      sor2008Row = data.annual_returns.find((r) => r.year === 2008) || null;
+      if (!sor2008Row) sorMode = 'computed_worst';
+    }
+  }
+
+  const minimumWithdrawalAnnual = inputs.minimum_withdrawal_annual || 0;
+  const floorBindingCounts = minimumWithdrawalAnnual > 0 ? b.floorBindingCounts : null;
+  const allGkEvents  = strategy === 'guyton_klinger'   ? b.gkEvents  : null;
+  const allVdsEvents = strategy === 'vanguard_dynamic' ? b.vdsEvents : null;
+  const noopYear1 = { add() {} };
+  const sampledYearCounts = new Map();
+  const year1YearCounts   = new Map();
+
+  for (let s = 0; s < N; s++) {
+    runOneSim({
+      simIndex: s, inputs, eligibleRows, sorMode, sor2008Row, Y,
+      distributionStrategy: strategy, minimumWithdrawalAnnual,
+      realSpendingDeclinePct: strat.realSpendingDeclinePct,
+      upperGuardrailPct:      strat.upperGuardrailPct,
+      lowerGuardrailPct:      strat.lowerGuardrailPct,
+      gkUpperAdjustmentPct:   strat.gkUpperAdjustmentPct,
+      gkLowerAdjustmentPct:   strat.gkLowerAdjustmentPct,
+      vdsCeilingPct:          strat.vdsCeilingPct,
+      vdsFloorPct:            strat.vdsFloorPct,
+      allGkEvents, allVdsEvents, floorBindingCounts,
+      withdrawalByYear:       b.withdrawalByYear,
+      cumInflationIdx:        b.cumInflationIdx,
+      initialWithdrawalRates: b.initialWithdrawalRates,
+      nominalBalances:        b.nominalBalances,
+      realBalances:           b.realBalances,
+      annualReturnsPct:       b.annualReturnsPct,
+      tbillReturnsPct:        b.tbillReturnsPct,
+      inflationsPct:          b.inflationsPct,
+      depletedFlags:          b.depletedFlags,
+      depletionYears:         b.depletionYears,
+      sampledYearCounts, year1YearCounts,
+      drawnInflation:  b.emptyArr,
+      drawnStockReturn: b.emptyArr,
+      correlationAssetKey: null,
+      year1AccRef: noopYear1,
+    });
+  }
+
+  return computeOptimizeStats(N, Y, b);
+}
+
+// Slim aggregation — success rate + real CAGR (median & mean) + real ending
+// wealth (median & mean). Real CAGR uses the same per-year Fisher-log method as
+// aggregate(), and the median uses percentileOf(...,'asc'), so cagr_real_median
+// matches the Simulator's statistics.p50.cagr_real for the same portfolio.
+function computeOptimizeStats(N, Y, b) {
+  const cagrReal   = new Array(N);
+  const endingReal = new Array(N);
+  let successCount = 0;
+  let cagrSum = 0, cagrN = 0;
+  let endSum = 0;
+
+  for (let s = 0; s < N; s++) {
+    const balanceBase = s * (Y + 1);
+    const annBase = s * Y;
+    const isDepleted = b.depletedFlags[s] === 1;
+    const deplYear = isDepleted ? b.depletionYears[s] : 0;
+    const activeYears = isDepleted ? Math.max(0, deplYear - 1) : Y;
+    if (!isDepleted) successCount++;
+
+    const er = b.realBalances[balanceBase + Y];
+    endingReal[s] = er;
+    endSum += er;
+
+    let cr = null;
+    if (activeYears > 0) {
+      let logReal = 0;
+      for (let t = 0; t < activeYears; t++) {
+        const rNom  = b.annualReturnsPct[annBase + t] / 100;
+        const rInfl = b.inflationsPct[annBase + t]    / 100;
+        const realFactor = (1 + rNom) / (1 + rInfl);
+        if (realFactor > 0) logReal += Math.log(realFactor);
+      }
+      cr = (Math.exp(logReal / activeYears) - 1) * 100;
+    }
+    cagrReal[s] = cr;
+    if (cr != null) { cagrSum += cr; cagrN++; }
+  }
+
+  return {
+    success_rate_pct:        (successCount / N) * 100,
+    cagr_real_median:        percentileOf(cagrReal, 50, 'asc'),
+    cagr_real_mean:          cagrN > 0 ? cagrSum / cagrN : null,
+    ending_wealth_real:      percentileOf(endingReal, 50, 'asc'),
+    ending_wealth_real_mean: endSum / N,
+  };
 }
