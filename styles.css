@@ -3222,7 +3222,16 @@ em { font-style: italic; }
 
 /* Per-asset min/max caps */
 .optimizer-caps { margin-bottom: 20px; }
-.optimizer-caps__head { margin-bottom: 8px; }
+.optimizer-caps__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+.optimizer-caps__actions { display: flex; gap: 8px; }
+.optimizer-btn--sm { font-size: 11.5px; padding: 4px 10px; }
 .optimizer-caps__rows {
   display: flex;
   flex-direction: column;
@@ -3277,6 +3286,30 @@ em { font-style: italic; }
     grid-template-columns: 1fr;
     gap: 6px;
   }
+}
+
+/* In-run "thinking" indicator */
+.optimizer-progress { padding: 20px 22px; }
+.optimizer-progress__title {
+  font-family: var(--font-serif);
+  font-size: 18px;
+  color: var(--ink);
+  margin: 0 0 12px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+.optimizer-progress__title::before {
+  content: "";
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--teal);
+  animation: optimizer-pulse 1.1s ease-in-out infinite;
+}
+@keyframes optimizer-pulse {
+  0%, 100% { opacity: 0.35; transform: scale(0.85); }
+  50%      { opacity: 1;    transform: scale(1.15); }
 }
 
 /* Assets left out of the grid for lack of full history over the plan period */

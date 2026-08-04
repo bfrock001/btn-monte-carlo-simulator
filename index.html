@@ -929,6 +929,10 @@
             <div class="optimizer-caps">
               <div class="optimizer-caps__head">
                 <label class="field-label">Per-asset limits <span class="field-note small">&mdash; min / max % of the portfolio (blank = 0 / 100)</span></label>
+                <div class="optimizer-caps__actions">
+                  <button type="button" class="optimizer-btn optimizer-btn--sm" id="optimizer-preset-diversify">Diversify: 5&ndash;50% each</button>
+                  <button type="button" class="optimizer-btn optimizer-btn--sm" id="optimizer-clear-caps">Clear limits</button>
+                </div>
               </div>
               <div id="optimizer-caps-rows" class="optimizer-caps__rows"></div>
               <p id="optimizer-excluded-note" class="optimizer-excluded-note" hidden></p>
@@ -943,9 +947,10 @@
           </div>
 
           <!-- Progress -->
-          <div id="optimizer-progress" class="dev-progress" hidden>
+          <div id="optimizer-progress" class="dev-progress optimizer-progress" hidden>
+            <p class="optimizer-progress__title">Running the model&hellip;</p>
             <div class="dev-progress__bar"><div class="dev-progress__fill" id="optimizer-progress-fill"></div></div>
-            <p class="dev-progress__label" id="optimizer-progress-label">Optimizing&hellip;</p>
+            <p class="dev-progress__label" id="optimizer-progress-label">Simulating&hellip;</p>
           </div>
 
           <!-- Empty / gate message -->

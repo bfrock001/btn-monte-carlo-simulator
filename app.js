@@ -975,7 +975,7 @@ function renderPeriodicTable() {
    ============================================================ */
 
 const OPTIMIZER_STEP_OPTIONS  = [5, 10, 20, 25];
-const OPTIMIZER_SIMS_OPTIONS  = [1000, 2000, 5000];
+const OPTIMIZER_SIMS_OPTIONS  = [1000, 2000, 5000, 10000];
 const OPTIMIZER_CANDIDATE_CAP  = 2000;   // hard block above this many portfolios
 const OPTIMIZER_CANDIDATE_WARN = 800;    // soft warning above this many
 // Rough per-sim-year cost (ms) used only for the runtime estimate. Calibrated
@@ -1216,6 +1216,28 @@ function initOptimizer() {
   const runBtn = document.getElementById('optimizer-run');
   if (runBtn) runBtn.addEventListener('click', runOptimizer);
 
+  // Caps quick-presets. "Diversify" caps every covered asset at 50% and adds a 5%
+  // floor — but only when the floor is feasible with room to vary. A 5% floor
+  // snaps up to the weight grid (e.g. 10% on a 10% step), so with many assets
+  // N×floor could exceed 100% (infeasible) or exactly equal it (only equal-weight
+  // survives). In those cases we apply the 50% cap alone. Default stays open, so
+  // concentrated/simple portfolios remain discoverable when no preset is applied.
+  const presetBtn = document.getElementById('optimizer-preset-diversify');
+  if (presetBtn) presetBtn.addEventListener('click', () => {
+    const { covered } = optimizerGridPartition();
+    const step = OPTIMIZER_STATE.step;
+    const m = Math.round(100 / step);
+    const floorUnits = Math.ceil(5 / step);              // grid units a 5% floor occupies
+    const applyFloor = covered.length * floorUnits < m;  // strict → feasible AND leaves room to vary
+    covered.forEach((k) => { OPTIMIZER_STATE.caps[k] = { min: applyFloor ? 5 : null, max: 50 }; });
+    renderOptimizerControls();
+  });
+  const clearBtn = document.getElementById('optimizer-clear-caps');
+  if (clearBtn) clearBtn.addEventListener('click', () => {
+    OPTIMIZER_STATE.caps = {};
+    renderOptimizerControls();
+  });
+
   initOptimizerAssetSelection();
   renderOptimizerControls();
 }
@@ -1381,7 +1403,7 @@ function renderOptimizerExcludedNote(excluded, start, byKey) {
   note.hidden = false;
   note.innerHTML =
     `<strong>Left out of the grid</strong> — no data back to ${start} (your Simulator plan's period): ${items}. ` +
-    `Every candidate is scored over the same window, so a shorter-history asset can't be mixed in fairly. ` +
+    `Every portfolio is scored over the same window, so a shorter-history asset can't be mixed in fairly. ` +
     `To include one, set the Simulator plan to a period starting at or after its first year (e.g. a custom range).`;
 }
 
@@ -1540,13 +1562,13 @@ function updateOptimizerPreview() {
   } else if (!feasible) {
     previewEl.textContent = 'No portfolio fits these limits.';
   } else if (exceeded) {
-    previewEl.innerHTML = `<strong>2,000+</strong> candidate portfolios — too many to run.`;
+    previewEl.innerHTML = `<strong>2,000+</strong> portfolios — too many to run.`;
   } else {
     const estMs = count * OPTIMIZER_STATE.simsPerCandidate * plan.period_years *
                   OPTIMIZER_MS_PER_SIM_YEAR / OPTIMIZER_STATE.poolSize;
     const estStr = estMs < 1000 ? '~1s' : `~${Math.round(estMs / 1000)}s`;
     previewEl.innerHTML =
-      `<strong>${count.toLocaleString('en-US')}</strong> candidate portfolio${count === 1 ? '' : 's'}` +
+      `<strong>${count.toLocaleString('en-US')}</strong> portfolio${count === 1 ? '' : 's'}` +
       ` · <span class="optimizer-preview__est">${estStr} on ${OPTIMIZER_STATE.poolSize} core${OPTIMIZER_STATE.poolSize === 1 ? '' : 's'}</span>`;
   }
 
@@ -1836,7 +1858,7 @@ function optimizerUpdateProgress(done, total) {
   const label = document.getElementById('optimizer-progress-label');
   if (fill)  fill.style.width = `${total ? Math.min(100, (done / total) * 100) : 0}%`;
   if (label) label.textContent =
-    `Optimizing… ${done.toLocaleString('en-US')} / ${total.toLocaleString('en-US')} portfolios`;
+    `Simulating every portfolio in your browser — ${done.toLocaleString('en-US')} / ${total.toLocaleString('en-US')}`;
 }
 
 function showOptimizerError(message) {
@@ -1891,7 +1913,7 @@ function renderOptimizerResults(res, meta) {
         `<p class="field-note small">Lower your success floor, allow more equity, or extend the data range.</p>` +
       `</div>`;
   } else {
-    headline = `<div class="optimizer-best optimizer-best--miss"><p class="optimizer-best__label">No valid portfolios — none of the candidates had data over your plan’s period.</p></div>`;
+    headline = `<div class="optimizer-best optimizer-best--miss"><p class="optimizer-best__label">No valid portfolios — none of the portfolios had data over your plan’s period.</p></div>`;
   }
 
   // Frontier table.
@@ -1997,11 +2019,11 @@ function buildOptimizerExportDoc() {
     settings: {
       weight_step_pct:    lr.step,
       success_floor_pct:  lr.floorPct,
-      sims_per_candidate: lr.N,
+      sims_per_portfolio: lr.N,
     },
     asset_universe: (lr.keys || []).map((k) => ({ key: k, name: (byKey.get(k) || {}).name || k })),
     summary: {
-      total_candidates: lr.points.length,
+      total_portfolios: lr.points.length,
       valid:            lr.results.validCount,
       invalid:          lr.results.invalidCount,
       frontier_size:    lr.results.frontier.length,
