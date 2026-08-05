@@ -3673,6 +3673,12 @@ em { font-style: italic; }
 }
 .opt-step2-banner strong { color: var(--navy); }
 .opt-step2-caps { margin: 4px 0 6px; }
+.opt-step2-chart-card { margin: 4px 0 16px; }
+.opt-step2-chart-container {
+  position: relative;
+  height: 320px;
+  width: 100%;
+}
 .opt-step2-bucket { margin-bottom: 14px; }
 .opt-step2-bucket__head {
   font-family: var(--font-sans);

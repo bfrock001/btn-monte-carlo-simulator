@@ -1373,6 +1373,7 @@ function bindOptimizerTwoStep() {
       // Floor doesn't change the simulated splits — re-pick the winner + redraw
       // the floor line from the existing points, no re-run.
       if (optimizerStep1Run) rederiveOptimizerStep1();
+      rederiveOptimizerStep2();
       syncOptimizerFreeFloorInput();
       updateOptimizerStep1Preview();
     });
@@ -1385,6 +1386,7 @@ function bindOptimizerTwoStep() {
       const raw = maxddInput.value.trim();
       OPTIMIZER_STATE.maxDrawdownPct = raw === '' ? null : clampPct(parseFloat(raw), null);
       if (optimizerStep1Run) rederiveOptimizerStep1();
+      rederiveOptimizerStep2();
       syncOptimizerFreeMaxddInput();
       updateOptimizerStep1Preview();
     });
@@ -1986,15 +1988,37 @@ function runOptimizerStep2() {
     });
 }
 
+let optimizerStep2Chart = null;   // Chart.js scatter for the refined-mix frontier
+let optimizerStep2Run = null;     // { points, plan, floorPct, ddCap, N, keys, elapsedMs, E }
+
 function finishOptimizerStep2(points, ctx) {
   const { plan, floorPct, N, keys, elapsedMs, E } = ctx;
-  const res = computeOptimizerResults(points, floorPct);
+  const ddCap = OPTIMIZER_STATE.maxDrawdownPct;
+  const res = computeOptimizerResults(points, floorPct, ddCap);
+  optimizerStep2Run = { points, plan, floorPct, ddCap, N, keys, elapsedMs, E };
   // Park this as the "last run" so the shared JSON/CSV export path exports it.
   OPTIMIZER_STATE.lastRun = {
-    points, plan, floorPct, N, step: OPT_STEP2_STEP, elapsedMs, keys, results: res,
+    points, plan, floorPct, ddCap, N, step: OPT_STEP2_STEP, elapsedMs, keys, results: res,
     signature: optimizerConfigSignature(),
   };
-  renderOptimizerStep2Results(res, { floorPct, N, step: OPT_STEP2_STEP, elapsedMs, total: points.length, E });
+  renderOptimizerStep2Results(res, { points, floorPct, ddCap, N, step: OPT_STEP2_STEP, elapsedMs, total: points.length, E });
+}
+
+// Re-rank the last Step-2 run at the current floor + drawdown cap (no re-sim).
+// Only fires while Step-2 results are on screen.
+function rederiveOptimizerStep2() {
+  const r = optimizerStep2Run;
+  const box = document.getElementById('opt-step2-results');
+  if (!r || !box || box.hidden) return;
+  const floorPct = OPTIMIZER_STATE.floorPct;
+  const ddCap = OPTIMIZER_STATE.maxDrawdownPct;
+  const res = computeOptimizerResults(r.points, floorPct, ddCap);
+  r.floorPct = floorPct; r.ddCap = ddCap;
+  OPTIMIZER_STATE.lastRun = {
+    points: r.points, plan: r.plan, floorPct, ddCap, N: r.N, step: OPT_STEP2_STEP,
+    elapsedMs: r.elapsedMs, keys: r.keys, results: res, signature: optimizerConfigSignature(),
+  };
+  renderOptimizerStep2Results(res, { points: r.points, floorPct, ddCap, N: r.N, step: OPT_STEP2_STEP, elapsedMs: r.elapsedMs, total: r.points.length, E: r.E });
 }
 
 function renderOptimizerStep2Results(res, meta) {
@@ -2002,54 +2026,78 @@ function renderOptimizerStep2Results(res, meta) {
   if (!box) return;
   box.hidden = false;
   const { best, closest, frontier, invalidCount } = res;
-  const { floorPct, N, step, elapsedMs, total, E } = meta;
+  const { points, floorPct, ddCap, N, step, elapsedMs, total, E } = meta;
   const F = 100 - E;
   const pick = best || closest;
+  const constraint = optimizerConstraintLabel(floorPct, ddCap);
 
   let headline;
   if (best) {
     headline =
       `<div class="optimizer-best">` +
-        `<p class="optimizer-best__label">Best ${E}/${F} portfolio clearing ${optimizerFmtPct(floorPct, 0)} success</p>` +
+        `<p class="optimizer-best__label">Best ${E}/${F} portfolio clearing ${constraint}</p>` +
         `<p class="optimizer-best__alloc">${optimizerAllocationSummary(best.allocation)}</p>` +
         `<div class="optimizer-best__stats">` +
           statPill('Success', optimizerFmtPct(best.success_rate_pct)) +
           statPill('Real median CAGR', optimizerFmtPct(best.cagr_real_median, 2)) +
           statPill('Median ending (real)', formatCurrency(Math.round(best.ending_wealth_real))) +
+          statPill('Max drawdown', optimizerFmtDD(best.mdd_investment_median)) +
         `</div>` +
       `</div>`;
   } else if (closest) {
     headline =
       `<div class="optimizer-best optimizer-best--miss">` +
-        `<p class="optimizer-best__label">No ${E}/${F} mix cleared ${optimizerFmtPct(floorPct, 0)} success</p>` +
+        `<p class="optimizer-best__label">No ${E}/${F} mix cleared ${constraint}</p>` +
         `<p class="optimizer-best__alloc">Closest: ${optimizerAllocationSummary(closest.allocation)}</p>` +
         `<div class="optimizer-best__stats">` +
-          statPill('Best success', optimizerFmtPct(closest.success_rate_pct)) +
+          statPill('Success', optimizerFmtPct(closest.success_rate_pct)) +
           statPill('Real median CAGR', optimizerFmtPct(closest.cagr_real_median, 2)) +
           statPill('Median ending (real)', formatCurrency(Math.round(closest.ending_wealth_real))) +
+          statPill('Max drawdown', optimizerFmtDD(closest.mdd_investment_median)) +
         `</div>` +
-        `<p class="field-note small">The split is locked — try a lower floor, or go back and pick a different split.</p>` +
+        `<p class="field-note small">The split is locked — lower your floor, raise your drawdown cap, or go back and pick a different split.</p>` +
       `</div>`;
   } else {
     headline = `<div class="optimizer-best optimizer-best--miss"><p class="optimizer-best__label">No valid portfolios in this split.</p></div>`;
   }
 
+  // Risk/return scatter card (built here so its canvas is in the DOM before the chart).
+  let chartCard = '';
+  if (pick) {
+    const capNote = ddCap != null ? ' · dashed = your drawdown cap' : '';
+    chartCard =
+      `<div class="chart-card opt-step2-chart-card">` +
+        `<div class="chart-card__head"><h3 class="chart-card__title">Return vs. drawdown — refined mixes</h3></div>` +
+        `<div class="chart-container opt-step2-chart-container"><canvas id="opt-step2-chart"></canvas></div>` +
+        `<p class="chart-card__note">Each dot is a portfolio at your locked split. Teal = clears both limits · gray = fails a limit · navy = winner · teal line = most return at each drawdown${capNote}.</p>` +
+      `</div>`;
+  }
+
+  // Frontier table (winner always shown, even if the cap pushes it off the
+  // success/CAGR frontier), with a Max Drawdown column.
+  let frontierRows = frontier;
+  if (best && !frontier.includes(best)) {
+    frontierRows = [...frontier, best].sort((a, b) =>
+      a.success_rate_pct - b.success_rate_pct || a.cagr_real_median - b.cagr_real_median);
+  }
   let table = '';
-  if (frontier.length) {
-    const rows = frontier.map((p) => {
+  if (frontierRows.length) {
+    const rows = frontierRows.map((p) => {
       const isBest = p === best;
-      return `<tr class="${isBest ? 'is-best' : ''}${p.meets_floor ? '' : ' is-belowfloor'}">` +
+      return `<tr class="${isBest ? 'is-best' : ''}${p.qualifies ? '' : ' is-belowfloor'}">` +
         `<td class="optimizer-rt__alloc">${optimizerAllocationSummary(p.allocation)}${isBest ? ' <span class="optimizer-tag">best</span>' : ''}</td>` +
         `<td class="num">${optimizerFmtPct(p.success_rate_pct)}</td>` +
         `<td class="num">${optimizerFmtPct(p.cagr_real_mean, 2)}</td>` +
         `<td class="num">${optimizerFmtPct(p.cagr_real_median, 2)}</td>` +
         `<td class="num">${formatCurrency(Math.round(p.ending_wealth_real))}</td>` +
+        `<td class="num${p.meets_dd ? '' : ' optimizer-dd-fail'}">${optimizerFmtDD(p.mdd_investment_median)}</td>` +
       `</tr>`;
     }).join('');
+    const dimNote = ddCap != null ? 'Rows failing your floor or drawdown cap are dimmed.' : 'Rows below your floor are dimmed.';
     table =
-      `<div class="optimizer-rt-head">Efficient frontier <span class="field-note small">— ${frontier.length} non-dominated portfolio${frontier.length === 1 ? '' : 's'} within your locked split. Rows below your floor are dimmed.</span></div>` +
+      `<div class="optimizer-rt-head">Efficient frontier <span class="field-note small">— non-dominated mixes within your locked split; your winner is highlighted. ${dimNote}</span></div>` +
       `<div class="table-wrap"><table class="optimizer-rt"><thead><tr>` +
-        `<th>Allocation</th><th class="num">Success</th><th class="num">Avg CAGR (real)</th><th class="num">Median CAGR (real)</th><th class="num">Median ending (real)</th>` +
+        `<th>Allocation</th><th class="num">Success</th><th class="num">Avg CAGR (real)</th><th class="num">Median CAGR (real)</th><th class="num">Median ending (real)</th><th class="num">Max drawdown</th>` +
       `</tr></thead><tbody>${rows}</tbody></table></div>`;
   }
 
@@ -2062,7 +2110,9 @@ function renderOptimizerStep2Results(res, meta) {
 
   const meta1 = `<p class="optimizer-meta field-note small">Ran <strong>${total.toLocaleString('en-US')}</strong> portfolios × ${N.toLocaleString('en-US')} sims in ${(elapsedMs / 1000).toFixed(1)}s · ${step}% sub-class grid, split locked at ${E}/${F}${invalidCount ? ` · ${invalidCount} skipped` : ''}. Success/CAGR are Monte-Carlo estimates — re-check the winner in the Simulator at full sims.</p>`;
 
-  box.innerHTML = headline + actions + table + meta1;
+  box.innerHTML = headline + chartCard + actions + table + meta1;
+
+  if (pick) renderOptimizerStep2Chart(res, meta);
 
   const loadBtn = document.getElementById('opt-step2-load-sim');
   if (loadBtn && pick) loadBtn.addEventListener('click', () => loadAllocationIntoSimulator(pick.allocation));
@@ -2070,6 +2120,74 @@ function renderOptimizerStep2Results(res, meta) {
   if (jsonBtn) jsonBtn.addEventListener('click', exportOptimizerJSON);
   const csvBtn = document.getElementById('opt-step2-export-csv');
   if (csvBtn) csvBtn.addEventListener('click', exportOptimizerCSV);
+}
+
+// Efficient-frontier scatter for the refined mixes: real median CAGR (Y) vs.
+// max drawdown (X). Qualifying dots teal, cap/floor failures gray, winner navy;
+// a teal line traces the CAGR-vs-drawdown efficient set, and a dashed line marks
+// the drawdown cap.
+function renderOptimizerStep2Chart(res, meta) {
+  const canvas = document.getElementById('opt-step2-chart');
+  if (!canvas || typeof Chart === 'undefined') return;
+  const css = (n, f) => (getComputedStyle(document.documentElement).getPropertyValue(n).trim() || f);
+  const teal = css('--teal', '#1A6E6E');
+  const clay = css('--clay', '#C84A30');
+  const navy = css('--navy', '#1F3D6B');
+  const faint = css('--faint', '#c7c7c7');
+
+  const { points, ddCap } = meta;
+  const best = res.best;
+  const ddMag = (p) => Math.abs(p.mdd_investment_median);
+  const valid = points.filter((p) => !p.invalid && p.cagr_real_median != null &&
+                                     Number.isFinite(p.cagr_real_median) && p.mdd_investment_median != null);
+  if (!valid.length) { if (optimizerStep2Chart) { optimizerStep2Chart.destroy(); optimizerStep2Chart = null; } return; }
+
+  // CAGR-vs-drawdown efficient set: no other valid point has ≤ drawdown AND ≥ CAGR.
+  const eff = valid.filter((p) => !valid.some((q) =>
+    q !== p && ddMag(q) <= ddMag(p) && q.cagr_real_median >= p.cagr_real_median &&
+    (ddMag(q) < ddMag(p) || q.cagr_real_median > p.cagr_real_median)))
+    .sort((a, b) => ddMag(a) - ddMag(b));
+
+  const pt = (p) => ({ x: ddMag(p), y: p.cagr_real_median });
+  const qual = valid.filter((p) => p.qualifies && p !== best).map(pt);
+  const fail = valid.filter((p) => !p.qualifies && p !== best).map(pt);
+
+  const cagrs = valid.map((p) => p.cagr_real_median);
+  const yMin = Math.min(...cagrs), yMax = Math.max(...cagrs);
+  const capData = ddCap != null ? [{ x: ddCap, y: yMin }, { x: ddCap, y: yMax }] : null;
+
+  const datasets = [
+    { type: 'line', label: 'Efficient set', data: eff.map(pt), borderColor: teal, backgroundColor: teal,
+      pointRadius: 0, borderWidth: 1.5, tension: 0.1, order: 3 },
+    { type: 'scatter', label: 'Fails a limit', data: fail, backgroundColor: faint, borderColor: faint, pointRadius: 3, order: 2 },
+    { type: 'scatter', label: 'Clears both limits', data: qual, backgroundColor: teal, borderColor: teal, pointRadius: 3.5, order: 1 },
+    ...(best ? [{ type: 'scatter', label: 'Winner', data: [pt(best)], backgroundColor: navy, borderColor: navy, pointRadius: 7, order: 0 }] : []),
+    ...(capData ? [{ type: 'line', label: `Drawdown cap (${ddCap}%)`, data: capData, borderColor: clay, backgroundColor: clay,
+      pointRadius: 0, borderDash: [6, 4], borderWidth: 1.5, order: 0 }] : []),
+  ];
+
+  if (optimizerStep2Chart) optimizerStep2Chart.destroy();
+  optimizerStep2Chart = new Chart(canvas.getContext('2d'), {
+    type: 'scatter',
+    data: { datasets },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      scales: {
+        x: { type: 'linear', title: { display: true, text: 'Max drawdown (bear-market)' }, ticks: { callback: (v) => `${v}%` } },
+        y: { type: 'linear', title: { display: true, text: 'Real median CAGR' }, ticks: { callback: (v) => `${v}%` } },
+      },
+      plugins: {
+        legend: { display: true, position: 'bottom' },
+        tooltip: { callbacks: {
+          label: (item) => {
+            const lbl = item.dataset.label;
+            if (lbl.startsWith('Drawdown cap')) return lbl;
+            return `${item.parsed.y.toFixed(2)}% CAGR @ ${item.parsed.x.toFixed(1)}% drawdown`;
+          },
+        } },
+      },
+    },
+  });
 }
 
 // Rebuild the parts of Tool 4 that depend on the shared selection or the
