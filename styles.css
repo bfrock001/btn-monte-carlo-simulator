@@ -3679,6 +3679,12 @@ em { font-style: italic; }
   height: 320px;
   width: 100%;
 }
+.opt-free-chart-card { margin: 4px 0 18px; }
+.opt-free-chart-container {
+  position: relative;
+  height: 320px;
+  width: 100%;
+}
 .opt-step2-bucket { margin-bottom: 14px; }
 .opt-step2-bucket__head {
   font-family: var(--font-sans);

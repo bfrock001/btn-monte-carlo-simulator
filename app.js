@@ -2843,8 +2843,12 @@ function computeOptimizerResults(points, floorPct, ddCap = null) {
   // Frontier sorted by success ascending (natural left→right for the chart).
   frontier.sort((a, b) => a.success_rate_pct - b.success_rate_pct || a.cagr_real_median - b.cagr_real_median);
 
+  // valid, ranked by real median CAGR desc — pads the table to ≥5 rows and feeds
+  // every portfolio to the free-mode frontier chart.
+  const rankedValid = [...valid].sort((a, b) => b.cagr_real_median - a.cagr_real_median);
+
   const invalidCount = points.length - valid.length;
-  return { best, closest, frontier, validCount: valid.length, invalidCount };
+  return { best, closest, frontier, valid: rankedValid, validCount: valid.length, invalidCount };
 }
 
 /* ---- Run-state UI helpers ---- */
@@ -2928,12 +2932,39 @@ function renderOptimizerResults(res, meta) {
     headline = `<div class="optimizer-best optimizer-best--miss"><p class="optimizer-best__label">No valid portfolios — none of the portfolios had data over your plan’s period.</p></div>`;
   }
 
+  const pick = best || closest;
+
+  // Efficient-frontier chart card (built here so its canvas is in the DOM before
+  // the chart is drawn): success rate (X) vs real median ending value (Y).
+  let chartCard = '';
+  if (res.valid && res.valid.length) {
+    const dotNote = ddCap != null
+      ? 'Teal clears your floor &amp; drawdown cap, gray misses one'
+      : 'Teal clears your success floor, gray falls below it';
+    chartCard =
+      `<div class="chart-card opt-free-chart-card">` +
+        `<div class="chart-card__head"><h3 class="chart-card__title">Success vs. ending value</h3></div>` +
+        `<div class="chart-container opt-free-chart-container"><canvas id="opt-free-chart"></canvas></div>` +
+        `<p class="chart-card__note">Each dot is a portfolio. ${dotNote} · navy = winner · teal line = most ending value at each success level · dashed = your success floor.</p>` +
+      `</div>`;
+  }
+
   // Frontier table. The Pareto set is success↑ vs CAGR↑; when the drawdown cap
   // binds, the winner can be dominated on those two axes, so make sure it's still
-  // shown (tagged "best").
+  // shown (tagged "best"). Always show ≥5 rows — pad with the next-highest
+  // real-CAGR portfolios (dimmed if they miss the floor/cap).
   let frontierRows = frontier;
   if (best && !frontier.includes(best)) {
     frontierRows = [...frontier, best].sort((a, b) =>
+      a.success_rate_pct - b.success_rate_pct || a.cagr_real_median - b.cagr_real_median);
+  }
+  if (frontierRows.length < 5 && res.valid) {
+    const shown = new Set(frontierRows);
+    for (const p of res.valid) {           // res.valid is ranked by real CAGR desc
+      if (frontierRows.length >= 5) break;
+      if (!shown.has(p)) { frontierRows = [...frontierRows, p]; shown.add(p); }
+    }
+    frontierRows.sort((a, b) =>
       a.success_rate_pct - b.success_rate_pct || a.cagr_real_median - b.cagr_real_median);
   }
   let table = '';
@@ -2959,7 +2990,6 @@ function renderOptimizerResults(res, meta) {
 
   // Actions: load the winner into the Simulator for a full-fidelity re-check,
   // and export the full point set for external plotting.
-  const pick = best || closest;
   const actions =
     `<div class="optimizer-actions">` +
       (pick ? `<button type="button" class="optimizer-btn" id="optimizer-load-sim">Load ${best ? 'best' : 'closest'} into Simulator</button>` : '') +
@@ -2969,7 +2999,9 @@ function renderOptimizerResults(res, meta) {
 
   const meta1 = `<p class="optimizer-meta field-note small">Ran <strong>${total.toLocaleString('en-US')}</strong> portfolios × ${N.toLocaleString('en-US')} sims in ${(elapsedMs / 1000).toFixed(1)}s · ${step}% weight grid${invalidCount ? ` · ${invalidCount} skipped (no data in period)` : ''}. Success/CAGR are Monte-Carlo estimates at ${N.toLocaleString('en-US')} sims — re-check the winner in the Simulator at full sims.</p>`;
 
-  box.innerHTML = headline + actions + table + meta1;
+  box.innerHTML = headline + chartCard + actions + table + meta1;
+
+  if (res.valid && res.valid.length) renderOptimizerFreeChart(res, meta);
 
   const loadBtn = document.getElementById('optimizer-load-sim');
   if (loadBtn && pick) loadBtn.addEventListener('click', () => loadAllocationIntoSimulator(pick.allocation));
@@ -2977,6 +3009,88 @@ function renderOptimizerResults(res, meta) {
   if (jsonBtn) jsonBtn.addEventListener('click', exportOptimizerJSON);
   const csvBtn = document.getElementById('optimizer-export-csv');
   if (csvBtn) csvBtn.addEventListener('click', exportOptimizerCSV);
+}
+
+let optimizerFreeChart = null;   // Chart.js scatter for the free-mode frontier
+
+// Free-mode efficient-frontier scatter: chance of success (X) vs real median
+// ending value (Y). Qualifying dots teal, floor/cap failures gray, winner navy;
+// a teal line traces the success-vs-ending-value efficient set (upper-right
+// envelope), and a dashed clay line marks the success floor.
+function renderOptimizerFreeChart(res, meta) {
+  const canvas = document.getElementById('opt-free-chart');
+  if (!canvas || typeof Chart === 'undefined') return;
+  const css = (n, f) => (getComputedStyle(document.documentElement).getPropertyValue(n).trim() || f);
+  const teal = css('--teal', '#1A6E6E');
+  const clay = css('--clay', '#C84A30');
+  const navy = css('--navy', '#1F3D6B');
+  const faint = css('--faint', '#c7c7c7');
+
+  const { floorPct, ddCap } = meta;
+  const best = res.best;
+  const valid = (res.valid || []).filter((p) =>
+    p.ending_wealth_real != null && Number.isFinite(p.ending_wealth_real) &&
+    p.success_rate_pct != null && Number.isFinite(p.success_rate_pct));
+  if (!valid.length) { if (optimizerFreeChart) { optimizerFreeChart.destroy(); optimizerFreeChart = null; } return; }
+
+  // Success-vs-ending-value efficient set: no other valid point has ≥ success AND
+  // ≥ ending value (the upper-right envelope).
+  const eff = valid.filter((p) => !valid.some((q) =>
+    q !== p && q.success_rate_pct >= p.success_rate_pct && q.ending_wealth_real >= p.ending_wealth_real &&
+    (q.success_rate_pct > p.success_rate_pct || q.ending_wealth_real > p.ending_wealth_real)))
+    .sort((a, b) => a.success_rate_pct - b.success_rate_pct || a.ending_wealth_real - b.ending_wealth_real);
+
+  const pt = (p) => ({ x: p.success_rate_pct, y: p.ending_wealth_real });
+  const qual = valid.filter((p) => p.qualifies && p !== best).map(pt);
+  const fail = valid.filter((p) => !p.qualifies && p !== best).map(pt);
+
+  const ys = valid.map((p) => p.ending_wealth_real);
+  const yMin = Math.min(...ys), yMax = Math.max(...ys);
+  const floorData = (floorPct != null) ? [{ x: floorPct, y: yMin }, { x: floorPct, y: yMax }] : null;
+
+  const qualLabel = ddCap != null ? 'Clears floor & cap' : 'Clears your floor';
+  const failLabel = ddCap != null ? 'Misses a limit' : 'Below your floor';
+
+  const datasets = [
+    { type: 'line', label: 'Efficient set', data: eff.map(pt), borderColor: teal, backgroundColor: teal,
+      pointRadius: 0, borderWidth: 1.5, tension: 0.1, order: 3 },
+    { type: 'scatter', label: failLabel, data: fail, backgroundColor: faint, borderColor: faint, pointRadius: 3, order: 2 },
+    { type: 'scatter', label: qualLabel, data: qual, backgroundColor: teal, borderColor: teal, pointRadius: 3.5, order: 1 },
+    ...(best ? [{ type: 'scatter', label: 'Winner', data: [pt(best)], backgroundColor: navy, borderColor: navy, pointRadius: 7, order: 0 }] : []),
+    ...(floorData ? [{ type: 'line', label: `Success floor (${floorPct}%)`, data: floorData, borderColor: clay, backgroundColor: clay,
+      pointRadius: 0, borderDash: [6, 4], borderWidth: 1.5, order: 0 }] : []),
+  ];
+
+  // Compact currency for the Y axis ticks ($1.2M / $850k / $500); tooltip shows full.
+  const fmtAxis = (v) => {
+    const a = Math.abs(v);
+    if (a >= 1e6) return `$${(v / 1e6).toFixed(1)}M`;
+    if (a >= 1e3) return `$${Math.round(v / 1e3)}k`;
+    return `$${Math.round(v)}`;
+  };
+
+  if (optimizerFreeChart) optimizerFreeChart.destroy();
+  optimizerFreeChart = new Chart(canvas.getContext('2d'), {
+    type: 'scatter',
+    data: { datasets },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      scales: {
+        x: { type: 'linear', title: { display: true, text: 'Chance of success' }, ticks: { callback: (v) => `${v}%` } },
+        y: { type: 'linear', title: { display: true, text: 'Median ending value (real)' }, ticks: { callback: fmtAxis } },
+      },
+      plugins: {
+        legend: { display: true, position: 'bottom' },
+        tooltip: { callbacks: {
+          label: (item) => {
+            const lbl = item.dataset.label;
+            if (lbl.startsWith('Success floor')) return lbl;
+            return `${formatCurrency(Math.round(item.parsed.y))} ending @ ${item.parsed.x.toFixed(1)}% success`;
+          },
+        } },
+      },
+    },
+  });
 }
 
 /* ---- Data export + "load into Simulator" ---- */
