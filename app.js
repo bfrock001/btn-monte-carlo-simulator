@@ -976,14 +976,14 @@ function renderPeriodicTable() {
 
 const OPTIMIZER_STEP_OPTIONS  = [5, 10, 20, 25];
 const OPTIMIZER_SIMS_OPTIONS  = [1000, 2000, 5000, 10000];
-// The portfolio ceiling is a TIME budget, not a fixed count: allow as many
-// portfolios as fit in ~OPTIMIZER_TIME_BUDGET_MS of estimated compute at the
-// current sims + plan horizon, clamped for memory safety. optimizerCandidateCap()
-// derives the live number. Users are fine waiting ~45s for a thorough search.
-const OPTIMIZER_TIME_BUDGET_MS = 45000;  // ~45s estimated-runtime budget
-const OPTIMIZER_CANDIDATE_MAX  = 20000;  // absolute hard ceiling (enumeration/memory)
-const OPTIMIZER_CANDIDATE_MIN  = 300;    // always allow at least this many
-const OPTIMIZER_WARN_MS         = 20000; // soft warning above ~20s estimated
+// The portfolio ceiling is a FIXED count — the same regardless of sims or plan
+// horizon, so the number the user sees is predictable. A bigger net is worth a
+// longer wait: the live runtime ESTIMATE + soft warning below flag a slow run
+// honestly (e.g. ~3 min at 10k sims × 10k portfolios) instead of silently
+// shrinking the search. optimizerCandidateCap() returns this so every call site
+// stays stable.
+const OPTIMIZER_PORTFOLIO_CAP  = 10000;  // fixed portfolio ceiling per run
+const OPTIMIZER_WARN_MS         = 20000; // soft warning above ~20s estimated runtime
 // Rough per-sim-year cost (ms) used only for the runtime estimate. Calibrated
 // against measured throughput (~0.0002 ms/sim-year/core: 1,001 portfolios ×
 // 1,000 sims × 30 yr ≈ 1.5s on 4 cores). Nudged up slightly so the estimate
@@ -1024,16 +1024,11 @@ const OPTIMIZER_STATE = {
 const OPTIMIZER_STORAGE_KEY = 'btn-mcsim-optimizer-selection';
 const OPTIMIZER_MODE_KEY    = 'btn-mcsim-optimizer-mode';
 
-// The live portfolio ceiling: how many portfolios fit in the time budget at the
-// current sims + plan horizon, clamped for memory. Grows when sims are low,
-// shrinks at 10k sims — so even a big search finishes in roughly the budget.
+// The portfolio ceiling: a fixed count, identical regardless of sims or horizon.
+// Kept as a function so every call site stays stable; the runtime estimate + soft
+// warning in updateOptimizer*Preview do the "this run will be slow" messaging.
 function optimizerCandidateCap() {
-  const { plan } = getSimulatorPlanForOptimizer();
-  const years = plan.period_years || 30;
-  const perCandidateMs = OPTIMIZER_STATE.simsPerCandidate * years *
-                         OPTIMIZER_MS_PER_SIM_YEAR / OPTIMIZER_STATE.poolSize;
-  const cap = Math.floor(OPTIMIZER_TIME_BUDGET_MS / Math.max(perCandidateMs, 1e-6));
-  return Math.max(OPTIMIZER_CANDIDATE_MIN, Math.min(cap, OPTIMIZER_CANDIDATE_MAX));
+  return OPTIMIZER_PORTFOLIO_CAP;
 }
 
 /* ---- Optimizer's own asset universe (add/delete), independent of the Data tab.
