@@ -1379,6 +1379,17 @@ function bindOptimizerTwoStep() {
     floorInput.addEventListener('blur', () => { floorInput.value = String(OPTIMIZER_STATE.floorPct); });
   }
 
+  const maxddInput = document.getElementById('opt-step1-maxdd');
+  if (maxddInput) {
+    maxddInput.addEventListener('input', () => {
+      const raw = maxddInput.value.trim();
+      OPTIMIZER_STATE.maxDrawdownPct = raw === '' ? null : clampPct(parseFloat(raw), null);
+      if (optimizerStep1Run) rederiveOptimizerStep1();
+      syncOptimizerFreeMaxddInput();
+      updateOptimizerStep1Preview();
+    });
+  }
+
   const simsSel = document.getElementById('opt-step1-sims');
   if (simsSel && simsSel.options.length === 0) {
     OPTIMIZER_SIMS_OPTIONS.forEach((n) => {
@@ -1412,13 +1423,19 @@ function syncOptimizerFreeSimsInput() {
   const s = document.getElementById('optimizer-sims');
   if (s) s.value = String(OPTIMIZER_STATE.simsPerCandidate);
 }
+function syncOptimizerFreeMaxddInput() {
+  const m = document.getElementById('optimizer-maxdd');
+  if (m) m.value = OPTIMIZER_STATE.maxDrawdownPct == null ? '' : String(OPTIMIZER_STATE.maxDrawdownPct);
+}
 
 // Two-step renderer (called on mode switch / tab show / asset change).
 function renderOptimizerTwoStep() {
   populateOptimizerProxySelects();
-  // Sync the shared floor / sims into the two-step inputs.
+  // Sync the shared floor / drawdown cap / sims into the two-step inputs.
   const f = document.getElementById('opt-step1-floor');
   if (f) f.value = String(OPTIMIZER_STATE.floorPct);
+  const md = document.getElementById('opt-step1-maxdd');
+  if (md) md.value = OPTIMIZER_STATE.maxDrawdownPct == null ? '' : String(OPTIMIZER_STATE.maxDrawdownPct);
   const s = document.getElementById('opt-step1-sims');
   if (s) s.value = String(OPTIMIZER_STATE.simsPerCandidate);
   updateOptimizerStep1Preview();
@@ -1564,14 +1581,15 @@ function runOptimizerStep1() {
 
 function finishOptimizerStep1(points, ctx) {
   const { plan, floorPct, N, equityKey, fiKey, start, end } = ctx;
-  // Winner = max real median CAGR among splits clearing the floor (same objective
-  // as free mode). computeOptimizerResults also tags meets_floor / on_frontier.
-  const res = computeOptimizerResults(points, floorPct);
+  // Winner = max real median CAGR among splits clearing BOTH the success floor
+  // and the max-drawdown cap. computeOptimizerResults tags meets_floor/meets_dd.
+  const ddCap = OPTIMIZER_STATE.maxDrawdownPct;
+  const res = computeOptimizerResults(points, floorPct, ddCap);
   const winner = res.best || res.closest || null;
   const winnerEquityPct = winner ? optimizerStep1EquityPct(winner, equityKey) : null;
 
   const prevLocked = OPTIMIZER_STATE.twostep.lockedEquityPct;
-  optimizerStep1Run = { points, plan, floorPct, N, equityKey, fiKey, start, end, winner, winnerEquityPct };
+  optimizerStep1Run = { points, plan, floorPct, ddCap, N, equityKey, fiKey, start, end, winner, winnerEquityPct };
   OPTIMIZER_STATE.twostep.lockedEquityPct = winnerEquityPct;
 
   // If Step 2 is already open and the winning split moved (e.g. the floor
@@ -1595,12 +1613,13 @@ function finishOptimizerStep1(points, ctx) {
   if (winner && res.best) {
     if (note) note.innerHTML =
       `Winning split: <strong>${winnerEquityPct}% ${escapeHtml(eqName)} / ${100 - winnerEquityPct}% ${escapeHtml(fiName)}</strong>` +
-      ` — ${winner.success_rate_pct.toFixed(1)}% success, ${winner.cagr_real_median.toFixed(2)}% real CAGR.`;
+      ` — ${winner.success_rate_pct.toFixed(1)}% success, ${winner.cagr_real_median.toFixed(2)}% real CAGR, ${optimizerFmtDD(winner.mdd_investment_median)} max drawdown.`;
     if (refineBtn) refineBtn.disabled = false;
   } else if (winner) {
+    const why = ddCap != null ? `your ${floorPct}% success / ${ddCap}% drawdown limits` : `your ${floorPct}% floor`;
     if (note) note.innerHTML =
-      `No split clears your ${floorPct}% floor. Closest is <strong>${winnerEquityPct}% ${escapeHtml(eqName)} / ${100 - winnerEquityPct}% ${escapeHtml(fiName)}</strong>` +
-      ` at ${winner.success_rate_pct.toFixed(1)}% success — lower your floor or extend the data range.`;
+      `No split clears ${why}. Closest is <strong>${winnerEquityPct}% ${escapeHtml(eqName)} / ${100 - winnerEquityPct}% ${escapeHtml(fiName)}</strong>` +
+      ` (${winner.success_rate_pct.toFixed(1)}% success, ${optimizerFmtDD(winner.mdd_investment_median)} drawdown) — loosen a limit or extend the data range.`;
     if (refineBtn) refineBtn.disabled = false;
   } else {
     if (note) note.textContent = 'No valid splits — check your plan and data range.';
@@ -1620,9 +1639,11 @@ function renderOptimizerStep1Chart(run) {
   const pts = [...run.points].sort((a, b) =>
     optimizerStep1EquityPct(a, run.equityKey) - optimizerStep1EquityPct(b, run.equityKey));
   const eq = (p) => optimizerStep1EquityPct(p, run.equityKey);
-  const successData = pts.map((p) => ({ x: eq(p), y: p.success_rate_pct }));
-  const wealthData  = pts.map((p) => ({ x: eq(p), y: p.ending_wealth_real }));
-  const floorData   = [{ x: 0, y: run.floorPct }, { x: 100, y: run.floorPct }];
+  const successData  = pts.map((p) => ({ x: eq(p), y: p.success_rate_pct }));
+  const drawdownData = pts.map((p) => ({ x: eq(p), y: p.mdd_investment_median == null ? null : Math.abs(p.mdd_investment_median) }));
+  const wealthData   = pts.map((p) => ({ x: eq(p), y: p.ending_wealth_real }));
+  const floorData    = [{ x: 0, y: run.floorPct }, { x: 100, y: run.floorPct }];
+  const capData      = run.ddCap != null ? [{ x: 0, y: run.ddCap }, { x: 100, y: run.ddCap }] : null;
 
   const wePct = run.winnerEquityPct;
   const ptRadius = pts.map((p) => (eq(p) === wePct ? 6 : 2.5));
@@ -1636,10 +1657,14 @@ function renderOptimizerStep1Chart(run) {
         { label: 'Success rate', data: successData, borderColor: teal, backgroundColor: teal,
           yAxisID: 'y', tension: 0.25, pointRadius: ptRadius, pointBackgroundColor: ptColor,
           pointBorderColor: ptColor, order: 1 },
-        { label: 'Median ending (real)', data: wealthData, borderColor: gold, backgroundColor: gold,
-          yAxisID: 'y1', tension: 0.25, pointRadius: 0, order: 2 },
-        { label: `Success floor (${run.floorPct}%)`, data: floorData, borderColor: clay, backgroundColor: clay,
+        { label: 'Max drawdown', data: drawdownData, borderColor: clay, backgroundColor: clay,
+          yAxisID: 'y', tension: 0.25, pointRadius: 0, order: 2 },
+        { label: `Success floor (${run.floorPct}%)`, data: floorData, borderColor: teal, backgroundColor: teal,
           yAxisID: 'y', pointRadius: 0, borderDash: [6, 4], borderWidth: 1.5, order: 0 },
+        ...(capData ? [{ label: `Drawdown cap (${run.ddCap}%)`, data: capData, borderColor: clay, backgroundColor: clay,
+          yAxisID: 'y', pointRadius: 0, borderDash: [6, 4], borderWidth: 1.5, order: 0 }] : []),
+        { label: 'Median ending (real)', data: wealthData, borderColor: gold, backgroundColor: gold,
+          yAxisID: 'y1', tension: 0.25, pointRadius: 0, order: 3 },
       ],
     },
     options: {
@@ -1650,7 +1675,7 @@ function renderOptimizerStep1Chart(run) {
              title: { display: true, text: '% in stocks' },
              ticks: { callback: (v) => `${v}%`, stepSize: 20 } },
         y: { position: 'left', min: 0, max: 100,
-             title: { display: true, text: 'Chance of success' },
+             title: { display: true, text: 'Success / drawdown' },
              ticks: { callback: (v) => `${v}%` } },
         y1: { position: 'right', grid: { drawOnChartArea: false },
               title: { display: true, text: 'Median ending (real)' },
@@ -1661,8 +1686,10 @@ function renderOptimizerStep1Chart(run) {
         tooltip: { callbacks: {
           title: (items) => `${items[0].parsed.x}% stocks / ${100 - items[0].parsed.x}% bonds`,
           label: (item) => {
+            const lbl = item.dataset.label;
             if (item.dataset.yAxisID === 'y1') return `Median ending (real): ${formatCurrency(item.parsed.y)}`;
-            if (item.dataset.label.startsWith('Success floor')) return item.dataset.label;
+            if (lbl.startsWith('Success floor') || lbl.startsWith('Drawdown cap')) return lbl;
+            if (lbl === 'Max drawdown') return `Max drawdown: ${item.parsed.y.toFixed(1)}%`;
             return `Success: ${item.parsed.y.toFixed(1)}%`;
           },
         } },
@@ -1682,23 +1709,28 @@ function renderOptimizerStep1Table(run) {
   let html =
     `<table class="opt-step1-table"><thead><tr>` +
     `<th>Split (stocks / bonds)</th><th>Success</th><th>Real median CAGR</th>` +
-    `<th>Median ending (real)</th><th>Volatility</th></tr></thead><tbody>`;
+    `<th>Median ending (real)</th><th>Volatility</th><th>Max drawdown</th></tr></thead><tbody>`;
   pts.forEach((p) => {
     const e = optimizerStep1EquityPct(p, run.equityKey);
     const vol = portfolioAnnualVol(p.allocation, run.start, run.end);
     const isWinner = e === run.winnerEquityPct;
-    const clears = p.success_rate_pct >= run.floorPct;
+    const clearsFloor = p.success_rate_pct >= run.floorPct;
+    const clearsDD = run.ddCap == null || (p.mdd_investment_median != null && p.mdd_investment_median >= -run.ddCap);
     html +=
       `<tr class="${isWinner ? 'is-winner' : ''}">` +
       `<td>${e}% stocks / ${100 - e}% bonds</td>` +
-      `<td class="${clears ? 'clears' : ''}">${p.success_rate_pct.toFixed(1)}%</td>` +
+      `<td class="${clearsFloor ? 'clears' : ''}">${p.success_rate_pct.toFixed(1)}%</td>` +
       `<td>${p.cagr_real_median != null ? p.cagr_real_median.toFixed(2) + '%' : '—'}</td>` +
       `<td>${formatCurrency(p.ending_wealth_real)}</td>` +
       `<td>${vol != null ? vol.toFixed(1) + '%' : '—'}</td>` +
+      `<td class="${clearsDD ? '' : 'optimizer-dd-fail'}">${optimizerFmtDD(p.mdd_investment_median)}</td>` +
       `</tr>`;
   });
   html += `</tbody></table>`;
-  html += `<p class="field-note small">Stocks = ${escapeHtml(eqName)} · Bonds = ${escapeHtml(fiName)}. Winner (highlighted) = the highest real median CAGR that still clears your ${run.floorPct}% floor.</p>`;
+  const winCond = run.ddCap != null
+    ? `the highest real median CAGR that clears your ${run.floorPct}% success floor and ${run.ddCap}% drawdown cap`
+    : `the highest real median CAGR that still clears your ${run.floorPct}% floor`;
+  html += `<p class="field-note small">Stocks = ${escapeHtml(eqName)} · Bonds = ${escapeHtml(fiName)}. Winner (highlighted) = ${winCond}.</p>`;
   wrap.innerHTML = html;
 }
 

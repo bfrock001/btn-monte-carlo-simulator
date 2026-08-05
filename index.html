@@ -1009,6 +1009,13 @@
                   </div>
                 </div>
                 <div class="optimizer-field">
+                  <label class="field-label" for="opt-step1-maxdd">Max drawdown</label>
+                  <div class="optimizer-floor-wrap">
+                    <input id="opt-step1-maxdd" class="num-input" type="number" min="0" max="100" step="1" inputmode="numeric" autocomplete="off" placeholder="off" />
+                    <span class="optimizer-floor-pct">%</span>
+                  </div>
+                </div>
+                <div class="optimizer-field">
                   <label class="field-label" for="opt-step1-sims">Simulations per split</label>
                   <select id="opt-step1-sims" class="select"></select>
                 </div>
@@ -1049,7 +1056,7 @@
                   <div class="chart-container opt-step1-chart-container">
                     <canvas id="opt-step1-chart"></canvas>
                   </div>
-                  <p class="chart-card__note">Teal = chance of success · gold = median ending wealth (real) · dashed line = your success floor · dot = winning split.</p>
+                  <p class="chart-card__note">Teal = chance of success · clay = max drawdown · gold = median ending wealth (real) · dashed = your floor / drawdown cap · dot = winning split.</p>
                 </div>
                 <div id="opt-step1-table" class="opt-step1-table-wrap"></div>
                 <div class="opt-step1-actions">
