@@ -3451,6 +3451,9 @@ em { font-style: italic; }
 .optimizer-rt tbody tr.is-best { background: rgba(26, 110, 110, 0.09); }
 .optimizer-rt tbody tr.is-best td { font-weight: 600; }
 .optimizer-rt tbody tr.is-belowfloor td { color: var(--faint); }
+/* Drawdown cell that exceeds the user's cap — flag it even on a qualifying row. */
+.optimizer-rt tbody td.optimizer-dd-fail { color: var(--clay); }
+.opt-step1-table tbody td.optimizer-dd-fail { color: var(--clay); }
 .optimizer-rt__alloc { max-width: 520px; line-height: 1.4; }
 .optimizer-tag {
   display: inline-block;

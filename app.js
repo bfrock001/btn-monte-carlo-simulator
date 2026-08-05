@@ -976,8 +976,14 @@ function renderPeriodicTable() {
 
 const OPTIMIZER_STEP_OPTIONS  = [5, 10, 20, 25];
 const OPTIMIZER_SIMS_OPTIONS  = [1000, 2000, 5000, 10000];
-const OPTIMIZER_CANDIDATE_CAP  = 2000;   // hard block above this many portfolios
-const OPTIMIZER_CANDIDATE_WARN = 800;    // soft warning above this many
+// The portfolio ceiling is a TIME budget, not a fixed count: allow as many
+// portfolios as fit in ~OPTIMIZER_TIME_BUDGET_MS of estimated compute at the
+// current sims + plan horizon, clamped for memory safety. optimizerCandidateCap()
+// derives the live number. Users are fine waiting ~45s for a thorough search.
+const OPTIMIZER_TIME_BUDGET_MS = 45000;  // ~45s estimated-runtime budget
+const OPTIMIZER_CANDIDATE_MAX  = 20000;  // absolute hard ceiling (enumeration/memory)
+const OPTIMIZER_CANDIDATE_MIN  = 300;    // always allow at least this many
+const OPTIMIZER_WARN_MS         = 20000; // soft warning above ~20s estimated
 // Rough per-sim-year cost (ms) used only for the runtime estimate. Calibrated
 // against measured throughput (~0.0002 ms/sim-year/core: 1,001 portfolios ×
 // 1,000 sims × 30 yr ≈ 1.5s on 4 cores). Nudged up slightly so the estimate
@@ -999,6 +1005,7 @@ const OPTIMIZER_STRATEGY_LABELS = {
 const OPTIMIZER_STATE = {
   step: 10,
   floorPct: 92,
+  maxDrawdownPct: null,   // max investment drawdown the user will accept (magnitude %); null = off
   simsPerCandidate: 2000,
   caps: {},        // key -> { min: number|null, max: number|null } in whole %
   lastCount: 0,    // candidate count from the most recent preview
@@ -1016,6 +1023,18 @@ const OPTIMIZER_STATE = {
 
 const OPTIMIZER_STORAGE_KEY = 'btn-mcsim-optimizer-selection';
 const OPTIMIZER_MODE_KEY    = 'btn-mcsim-optimizer-mode';
+
+// The live portfolio ceiling: how many portfolios fit in the time budget at the
+// current sims + plan horizon, clamped for memory. Grows when sims are low,
+// shrinks at 10k sims — so even a big search finishes in roughly the budget.
+function optimizerCandidateCap() {
+  const { plan } = getSimulatorPlanForOptimizer();
+  const years = plan.period_years || 30;
+  const perCandidateMs = OPTIMIZER_STATE.simsPerCandidate * years *
+                         OPTIMIZER_MS_PER_SIM_YEAR / OPTIMIZER_STATE.poolSize;
+  const cap = Math.floor(OPTIMIZER_TIME_BUDGET_MS / Math.max(perCandidateMs, 1e-6));
+  return Math.max(OPTIMIZER_CANDIDATE_MIN, Math.min(cap, OPTIMIZER_CANDIDATE_MAX));
+}
 
 /* ---- Optimizer's own asset universe (add/delete), independent of the Data tab.
    Mirrors the Data-tab chip + add-menu pattern, bound to STATE.optimizer. ---- */
@@ -1218,6 +1237,19 @@ function initOptimizer() {
     });
     floorInput.addEventListener('blur', () => {
       floorInput.value = String(OPTIMIZER_STATE.floorPct);
+    });
+  }
+
+  const maxddInput = document.getElementById('optimizer-maxdd');
+  if (maxddInput) {
+    maxddInput.value = OPTIMIZER_STATE.maxDrawdownPct == null ? '' : String(OPTIMIZER_STATE.maxDrawdownPct);
+    maxddInput.addEventListener('input', () => {
+      const raw = maxddInput.value.trim();
+      OPTIMIZER_STATE.maxDrawdownPct = raw === '' ? null : clampPct(parseFloat(raw), null);
+      // The drawdown cap is a post-hoc filter — re-rank the existing run in place.
+      const lr = OPTIMIZER_STATE.lastRun;
+      if (lr && lr.signature === optimizerConfigSignature()) rederiveOptimizerResults();
+      updateOptimizerPreview();
     });
   }
 
@@ -1816,13 +1848,13 @@ function optimizerStep2Candidates() {
   if (E == null) return { candidates: [], eqKeys: [], fiKeys: [] };
   const F = 100 - E;
   const { equityKeys, fiKeys } = optimizerStep2Buckets();
-  const eqComps = E === 0 ? [[]] : enumerateGridCompositions(equityKeys, OPT_STEP2_STEP, OPTIMIZER_CANDIDATE_CAP, E);
-  const fiComps = F === 0 ? [[]] : enumerateGridCompositions(fiKeys, OPT_STEP2_STEP, OPTIMIZER_CANDIDATE_CAP, F);
+  const eqComps = E === 0 ? [[]] : enumerateGridCompositions(equityKeys, OPT_STEP2_STEP, optimizerCandidateCap(), E);
+  const fiComps = F === 0 ? [[]] : enumerateGridCompositions(fiKeys, OPT_STEP2_STEP, optimizerCandidateCap(), F);
   const candidates = [];
   for (const ec of eqComps) {
     for (const fc of fiComps) {
       candidates.push(ec.concat(fc));
-      if (candidates.length > OPTIMIZER_CANDIDATE_CAP) {
+      if (candidates.length > optimizerCandidateCap()) {
         return { candidates, eqKeys: equityKeys, fiKeys, overflow: true };
       }
     }
@@ -1842,8 +1874,8 @@ function updateOptimizerStep2Preview() {
   const { equityKeys, fiKeys } = optimizerStep2Buckets();
 
   let warn = '', canRun = true, count = 0;
-  const eqCnt = optimizerStep2BucketCount(equityKeys, E || 0, OPTIMIZER_CANDIDATE_CAP);
-  const fiCnt = optimizerStep2BucketCount(fiKeys, F || 0, OPTIMIZER_CANDIDATE_CAP);
+  const eqCnt = optimizerStep2BucketCount(equityKeys, E || 0, optimizerCandidateCap());
+  const fiCnt = optimizerStep2BucketCount(fiKeys, F || 0, optimizerCandidateCap());
 
   if (!hasSpending || E == null) { canRun = false; }
   else if (E > 0 && equityKeys.length === 0) { canRun = false; warn = 'Select at least one stock asset class above to fill the stock bucket.'; }
@@ -1851,7 +1883,7 @@ function updateOptimizerStep2Preview() {
   else if (!eqCnt.feasible || !fiCnt.feasible) { canRun = false; warn = 'No mix fits these per-asset limits — loosen a min/max.'; }
   else {
     count = eqCnt.count * fiCnt.count;
-    if (eqCnt.exceeded || fiCnt.exceeded || count > OPTIMIZER_CANDIDATE_CAP) {
+    if (eqCnt.exceeded || fiCnt.exceeded || count > optimizerCandidateCap()) {
       canRun = false;
       warn = `Too many mixes to run at a ${OPT_STEP2_STEP}% grid. Refine fewer sub-classes, or add per-asset limits.`;
     }
@@ -1896,7 +1928,7 @@ function runOptimizerStep2() {
   if (E == null) return;
   const [start, end] = optimizerPlanPeriodRange(plan);
   const { candidates, eqKeys, fiKeys, overflow } = optimizerStep2Candidates();
-  if (overflow || candidates.length === 0 || candidates.length > OPTIMIZER_CANDIDATE_CAP) return;
+  if (overflow || candidates.length === 0 || candidates.length > optimizerCandidateCap()) return;
 
   const floorPct = OPTIMIZER_STATE.floorPct;
   const N = OPTIMIZER_STATE.simsPerCandidate;
@@ -2346,7 +2378,7 @@ function updateOptimizerPreview() {
   let count = 0, exceeded = false, feasible = true;
   if (keys.length >= 2) {
     const { m, lo, hi } = optimizerUnitBounds(keys, step);
-    const res = countGridCompositions(lo, hi, m, OPTIMIZER_CANDIDATE_CAP);
+    const res = countGridCompositions(lo, hi, m, optimizerCandidateCap());
     count = res.count; exceeded = res.exceeded; feasible = res.feasible;
   }
   OPTIMIZER_STATE.lastCount = count;
@@ -2359,7 +2391,7 @@ function updateOptimizerPreview() {
   } else if (!feasible) {
     previewEl.textContent = 'No portfolio fits these limits.';
   } else if (exceeded) {
-    previewEl.innerHTML = `<strong>2,000+</strong> portfolios — too many to run.`;
+    previewEl.innerHTML = `<strong>${optimizerCandidateCap().toLocaleString('en-US')}+</strong> portfolios — too many to run.`;
   } else {
     const estMs = count * OPTIMIZER_STATE.simsPerCandidate * plan.period_years *
                   OPTIMIZER_MS_PER_SIM_YEAR / OPTIMIZER_STATE.poolSize;
@@ -2377,7 +2409,7 @@ function updateOptimizerPreview() {
   if (keys.length >= 2 && !feasible) {
     warnHtml = 'No portfolio fits these limits — your minimums add up past 100%, or your maximums don’t reach 100%. Loosen a limit.';
   } else if (exceeded) {
-    const fit = finestStepUnderCap(keys, OPTIMIZER_CANDIDATE_CAP);
+    const fit = finestStepUnderCap(keys, optimizerCandidateCap());
     if (fit && fit.step > step) {
       suggestStep = fit.step;
       warnHtml =
@@ -2388,11 +2420,15 @@ function updateOptimizerPreview() {
     } else {
       const coarsest = OPTIMIZER_STEP_OPTIONS[OPTIMIZER_STEP_OPTIONS.length - 1];
       warnHtml =
-        `Too many portfolios to run (over ${OPTIMIZER_CANDIDATE_CAP.toLocaleString('en-US')}), even at a ${coarsest}% step. ` +
+        `Too many portfolios to run (over ${optimizerCandidateCap().toLocaleString('en-US')}), even at a ${coarsest}% step. ` +
         `A grid over ${keys.length} assets is very wide — remove a few asset classes above, or add per-asset limits.`;
     }
-  } else if (count > OPTIMIZER_CANDIDATE_WARN) {
-    warnHtml = `Large search (${count.toLocaleString('en-US')} portfolios). This may take a while — a coarser step will speed it up.`;
+  } else if (count >= 2) {
+    const estMs = count * OPTIMIZER_STATE.simsPerCandidate * plan.period_years *
+                  OPTIMIZER_MS_PER_SIM_YEAR / OPTIMIZER_STATE.poolSize;
+    if (estMs > OPTIMIZER_WARN_MS) {
+      warnHtml = `Large search (~${Math.round(estMs / 1000)}s). A coarser step or fewer sims will speed it up.`;
+    }
   }
   if (warnEl) {
     warnEl.hidden = warnHtml === '';
@@ -2431,7 +2467,7 @@ function updateOptimizerRunState({ keys, hasSpending, count, exceeded, feasible 
   if (OPTIMIZER_STATE.running) { btn.disabled = true; return; }
   const floorValid = OPTIMIZER_STATE.floorPct >= 0 && OPTIMIZER_STATE.floorPct <= 100;
   const configValid = hasSpending && keys.length >= 2 && feasible && !exceeded &&
-                      count >= 1 && count <= OPTIMIZER_CANDIDATE_CAP && floorValid;
+                      count >= 1 && count <= optimizerCandidateCap() && floorValid;
   btn.disabled = !configValid || !OPTIMIZER_ENGINE_READY;
   btn.title = OPTIMIZER_ENGINE_READY ? '' : 'Optimization engine arrives in the next update.';
 }
@@ -2550,8 +2586,8 @@ function runOptimizer() {
   if (!hasSpending || keys.length < 2) return;
 
   const step = OPTIMIZER_STATE.step;
-  const candidates = enumerateGridCompositions(keys, step, OPTIMIZER_CANDIDATE_CAP);
-  if (candidates.length === 0 || candidates.length > OPTIMIZER_CANDIDATE_CAP) return;
+  const candidates = enumerateGridCompositions(keys, step, optimizerCandidateCap());
+  if (candidates.length === 0 || candidates.length > optimizerCandidateCap()) return;
 
   const floorPct = OPTIMIZER_STATE.floorPct;
   const N = OPTIMIZER_STATE.simsPerCandidate;
@@ -2577,12 +2613,13 @@ function runOptimizer() {
 function finishOptimizer(points, plan, floorPct, N, step, elapsedMs, keys) {
   OPTIMIZER_STATE.running = false;
   setOptimizerBusy(false);
-  const res = computeOptimizerResults(points, floorPct);
+  const ddCap = OPTIMIZER_STATE.maxDrawdownPct;
+  const res = computeOptimizerResults(points, floorPct, ddCap);
   OPTIMIZER_STATE.lastRun = {
-    points, plan, floorPct, N, step, elapsedMs, keys, results: res,
+    points, plan, floorPct, ddCap, N, step, elapsedMs, keys, results: res,
     signature: optimizerConfigSignature(),
   };
-  renderOptimizerResults(res, { plan, floorPct, N, step, elapsedMs, total: points.length });
+  renderOptimizerResults(res, { plan, floorPct, ddCap, N, step, elapsedMs, total: points.length });
   updateOptimizerPreview(); // restore run-button enabled state
 }
 
@@ -2600,41 +2637,48 @@ function optimizerConfigSignature() {
   });
 }
 
-// Re-rank an existing run against the current floor without re-simulating.
+// Re-rank an existing run against the current floor + drawdown cap without
+// re-simulating (both are post-hoc filters on the stored points).
 function rederiveOptimizerResults() {
   const lr = OPTIMIZER_STATE.lastRun;
   if (!lr) return;
-  const res = computeOptimizerResults(lr.points, OPTIMIZER_STATE.floorPct);
+  const ddCap = OPTIMIZER_STATE.maxDrawdownPct;
+  const res = computeOptimizerResults(lr.points, OPTIMIZER_STATE.floorPct, ddCap);
   lr.results = res;
   lr.floorPct = OPTIMIZER_STATE.floorPct;
   renderOptimizerResults(res, {
-    plan: lr.plan, floorPct: OPTIMIZER_STATE.floorPct,
+    plan: lr.plan, floorPct: OPTIMIZER_STATE.floorPct, ddCap,
     N: lr.N, step: lr.step, elapsedMs: lr.elapsedMs, total: lr.points.length,
   });
 }
 
 // Identify the winning portfolio + the Pareto-efficient frontier, and tag every
-// point with meets_floor / on_frontier. "Best" = max real median CAGR among
-// points clearing the success floor; if none clear it, expose the closest (the
-// highest success rate achieved).
-function computeOptimizerResults(points, floorPct) {
+// point with meets_floor / meets_dd / qualifies / on_frontier. "Best" = max real
+// median CAGR among points clearing BOTH the success floor AND the max-drawdown
+// cap (ddCap = a magnitude %, e.g. 35; null = off). If none qualify, expose the
+// closest (highest success among cap-respecting points, else overall). Drawdown
+// is stored negative (e.g. -32.5), so "|dd| ≤ cap" is "mdd ≥ -cap".
+function computeOptimizerResults(points, floorPct, ddCap = null) {
   const valid = points.filter((p) => !p.invalid && p.cagr_real_median != null && Number.isFinite(p.cagr_real_median));
+  const meetsDD = (p) => ddCap == null || (p.mdd_investment_median != null && p.mdd_investment_median >= -ddCap);
 
   let best = null;
   let closest = null;
-  const clearing = valid.filter((p) => p.success_rate_pct >= floorPct);
-  if (clearing.length) {
-    best = clearing.reduce((a, b) => (b.cagr_real_median > a.cagr_real_median ? b : a));
+  const qualifying = valid.filter((p) => p.success_rate_pct >= floorPct && meetsDD(p));
+  if (qualifying.length) {
+    best = qualifying.reduce((a, b) => (b.cagr_real_median > a.cagr_real_median ? b : a));
   } else if (valid.length) {
-    // Highest success rate; tie-break on real median CAGR.
-    closest = valid.reduce((a, b) => {
+    // No portfolio clears both constraints. Closest = highest success among the
+    // cap-respecting points (if any), else highest success overall.
+    const pool = valid.filter(meetsDD);
+    const from = pool.length ? pool : valid;
+    closest = from.reduce((a, b) => {
       if (b.success_rate_pct !== a.success_rate_pct) return b.success_rate_pct > a.success_rate_pct ? b : a;
       return b.cagr_real_median > a.cagr_real_median ? b : a;
     });
   }
 
-  // Pareto frontier: a point is efficient if no other valid point has both
-  // success ≥ and real median CAGR ≥, with at least one strictly greater.
+  // Pareto frontier: success ↑ vs real median CAGR ↑ (drawdown shown as a column).
   const frontier = valid.filter((p) => !valid.some((q) =>
     q !== p &&
     q.success_rate_pct  >= p.success_rate_pct &&
@@ -2644,11 +2688,14 @@ function computeOptimizerResults(points, floorPct) {
   const frontierSet = new Set(frontier);
 
   points.forEach((p) => {
-    p.meets_floor = !p.invalid && p.cagr_real_median != null && p.success_rate_pct >= floorPct;
+    const ok = !p.invalid && p.cagr_real_median != null;
+    p.meets_floor = ok && p.success_rate_pct >= floorPct;
+    p.meets_dd    = ok && meetsDD(p);
+    p.qualifies   = p.meets_floor && p.meets_dd;
     p.on_frontier = frontierSet.has(p);
   });
 
-  // Frontier sorted by success ascending (natural left→right for the future chart).
+  // Frontier sorted by success ascending (natural left→right for the chart).
   frontier.sort((a, b) => a.success_rate_pct - b.success_rate_pct || a.cagr_real_median - b.cagr_real_median);
 
   const invalidCount = points.length - valid.length;
@@ -2688,6 +2735,13 @@ function optimizerAllocationSummary(alloc) {
 }
 
 function optimizerFmtPct(v, d = 1) { return v == null ? '—' : `${v.toFixed(d)}%`; }
+// Drawdown is stored negative; show its magnitude (e.g. -32.5 → "32.5%").
+function optimizerFmtDD(v, d = 1) { return v == null ? '—' : `${Math.abs(v).toFixed(d)}%`; }
+// "92% success" or "92% success & ≤35% drawdown" depending on the cap.
+function optimizerConstraintLabel(floorPct, ddCap) {
+  const s = `${optimizerFmtPct(floorPct, 0)} success`;
+  return ddCap != null ? `${s} & max drawdown ${ddCap}%` : s;
+}
 
 function renderOptimizerResults(res, meta) {
   const box = document.getElementById('optimizer-results');
@@ -2695,54 +2749,66 @@ function renderOptimizerResults(res, meta) {
   box.hidden = false;
 
   const { best, closest, frontier, validCount, invalidCount } = res;
-  const { floorPct, N, step, elapsedMs, total } = meta;
+  const { floorPct, ddCap, N, step, elapsedMs, total } = meta;
+  const constraint = optimizerConstraintLabel(floorPct, ddCap);
 
   // Headline: winner or closest-miss.
   let headline;
   if (best) {
     headline =
       `<div class="optimizer-best">` +
-        `<p class="optimizer-best__label">Best portfolio clearing ${optimizerFmtPct(floorPct, 0)} success</p>` +
+        `<p class="optimizer-best__label">Best portfolio clearing ${constraint}</p>` +
         `<p class="optimizer-best__alloc">${optimizerAllocationSummary(best.allocation)}</p>` +
         `<div class="optimizer-best__stats">` +
           statPill('Success', optimizerFmtPct(best.success_rate_pct)) +
           statPill('Real median CAGR', optimizerFmtPct(best.cagr_real_median, 2)) +
           statPill('Median ending (real)', formatCurrency(Math.round(best.ending_wealth_real))) +
+          statPill('Max drawdown', optimizerFmtDD(best.mdd_investment_median)) +
         `</div>` +
       `</div>`;
   } else if (closest) {
     headline =
       `<div class="optimizer-best optimizer-best--miss">` +
-        `<p class="optimizer-best__label">No portfolio cleared ${optimizerFmtPct(floorPct, 0)} success</p>` +
+        `<p class="optimizer-best__label">No portfolio cleared ${constraint}</p>` +
         `<p class="optimizer-best__alloc">Closest: ${optimizerAllocationSummary(closest.allocation)}</p>` +
         `<div class="optimizer-best__stats">` +
-          statPill('Best success', optimizerFmtPct(closest.success_rate_pct)) +
+          statPill('Success', optimizerFmtPct(closest.success_rate_pct)) +
           statPill('Real median CAGR', optimizerFmtPct(closest.cagr_real_median, 2)) +
           statPill('Median ending (real)', formatCurrency(Math.round(closest.ending_wealth_real))) +
+          statPill('Max drawdown', optimizerFmtDD(closest.mdd_investment_median)) +
         `</div>` +
-        `<p class="field-note small">Lower your success floor, allow more equity, or extend the data range.</p>` +
+        `<p class="field-note small">Lower your success floor, raise your drawdown cap, allow more equity, or extend the data range.</p>` +
       `</div>`;
   } else {
     headline = `<div class="optimizer-best optimizer-best--miss"><p class="optimizer-best__label">No valid portfolios — none of the portfolios had data over your plan’s period.</p></div>`;
   }
 
-  // Frontier table.
+  // Frontier table. The Pareto set is success↑ vs CAGR↑; when the drawdown cap
+  // binds, the winner can be dominated on those two axes, so make sure it's still
+  // shown (tagged "best").
+  let frontierRows = frontier;
+  if (best && !frontier.includes(best)) {
+    frontierRows = [...frontier, best].sort((a, b) =>
+      a.success_rate_pct - b.success_rate_pct || a.cagr_real_median - b.cagr_real_median);
+  }
   let table = '';
-  if (frontier.length) {
-    const rows = frontier.map((p) => {
+  if (frontierRows.length) {
+    const rows = frontierRows.map((p) => {
       const isBest = p === best;
-      return `<tr class="${isBest ? 'is-best' : ''}${p.meets_floor ? '' : ' is-belowfloor'}">` +
+      return `<tr class="${isBest ? 'is-best' : ''}${p.qualifies ? '' : ' is-belowfloor'}">` +
         `<td class="optimizer-rt__alloc">${optimizerAllocationSummary(p.allocation)}${isBest ? ' <span class="optimizer-tag">best</span>' : ''}</td>` +
         `<td class="num">${optimizerFmtPct(p.success_rate_pct)}</td>` +
         `<td class="num">${optimizerFmtPct(p.cagr_real_mean, 2)}</td>` +
         `<td class="num">${optimizerFmtPct(p.cagr_real_median, 2)}</td>` +
         `<td class="num">${formatCurrency(Math.round(p.ending_wealth_real))}</td>` +
+        `<td class="num${p.meets_dd ? '' : ' optimizer-dd-fail'}">${optimizerFmtDD(p.mdd_investment_median)}</td>` +
       `</tr>`;
     }).join('');
+    const dimNote = ddCap != null ? 'Rows failing your floor or drawdown cap are dimmed.' : 'Rows below your floor are dimmed.';
     table =
-      `<div class="optimizer-rt-head">Efficient frontier <span class="field-note small">— ${frontier.length} non-dominated portfolio${frontier.length === 1 ? '' : 's'} (success ↑, real median CAGR ↑). Rows below your floor are dimmed.</span></div>` +
+      `<div class="optimizer-rt-head">Efficient frontier <span class="field-note small">— non-dominated portfolios (success ↑, real median CAGR ↑); your winner is highlighted. ${dimNote}</span></div>` +
       `<div class="table-wrap"><table class="optimizer-rt"><thead><tr>` +
-        `<th>Allocation</th><th class="num">Success</th><th class="num">Avg CAGR (real)</th><th class="num">Median CAGR (real)</th><th class="num">Median ending (real)</th>` +
+        `<th>Allocation</th><th class="num">Success</th><th class="num">Avg CAGR (real)</th><th class="num">Median CAGR (real)</th><th class="num">Median ending (real)</th><th class="num">Max drawdown</th>` +
       `</tr></thead><tbody>${rows}</tbody></table></div>`;
   }
 
@@ -2801,7 +2867,9 @@ function optimizerPointExport(p) {
     cagr_real_median:        optimizerRound(p.cagr_real_median, 4),
     ending_wealth_real:      p.ending_wealth_real == null ? null : Math.round(p.ending_wealth_real),
     ending_wealth_real_mean: p.ending_wealth_real_mean == null ? null : Math.round(p.ending_wealth_real_mean),
+    mdd_investment_median:   optimizerRound(p.mdd_investment_median, 3),
     meets_floor:  !!p.meets_floor,
+    meets_dd:     !!p.meets_dd,
     on_frontier:  !!p.on_frontier,
   };
 }
@@ -2827,9 +2895,10 @@ function buildOptimizerExportDoc() {
         : plan.historical_period,
     },
     settings: {
-      weight_step_pct:    lr.step,
-      success_floor_pct:  lr.floorPct,
-      sims_per_portfolio: lr.N,
+      weight_step_pct:      lr.step,
+      success_floor_pct:    lr.floorPct,
+      max_drawdown_cap_pct: lr.ddCap == null ? null : lr.ddCap,
+      sims_per_portfolio:   lr.N,
     },
     asset_universe: (lr.keys || []).map((k) => ({ key: k, name: (byKey.get(k) || {}).name || k })),
     summary: {
@@ -2851,7 +2920,8 @@ function buildOptimizerCSV() {
   const header = [
     ...keys.map((k) => `pct_${k}`),
     'success_rate_pct', 'cagr_real_mean', 'cagr_real_median',
-    'ending_wealth_real', 'ending_wealth_real_mean', 'meets_floor', 'on_frontier',
+    'ending_wealth_real', 'ending_wealth_real_mean', 'mdd_investment_median',
+    'meets_floor', 'meets_dd', 'on_frontier',
   ];
   const lines = [header.join(',')];
   for (const p of lr.points) {
@@ -2864,7 +2934,9 @@ function buildOptimizerCSV() {
       optimizerRound(p.cagr_real_median, 4),
       p.ending_wealth_real == null ? '' : Math.round(p.ending_wealth_real),
       p.ending_wealth_real_mean == null ? '' : Math.round(p.ending_wealth_real_mean),
+      optimizerRound(p.mdd_investment_median, 3),
       p.meets_floor ? 1 : 0,
+      p.meets_dd ? 1 : 0,
       p.on_frontier ? 1 : 0,
     ];
     lines.push(row.join(','));

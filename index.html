@@ -935,6 +935,14 @@
                 <p class="field-note small">The winning portfolio must clear this.</p>
               </div>
               <div class="optimizer-field">
+                <label class="field-label" for="optimizer-maxdd">Max drawdown</label>
+                <div class="optimizer-floor-wrap">
+                  <input id="optimizer-maxdd" class="num-input" type="number" min="0" max="100" step="1" inputmode="numeric" autocomplete="off" placeholder="off" />
+                  <span class="optimizer-floor-pct">%</span>
+                </div>
+                <p class="field-note small">Biggest bear market you'll sit through (blank = off).</p>
+              </div>
+              <div class="optimizer-field">
                 <label class="field-label" for="optimizer-sims">Simulations per portfolio</label>
                 <select id="optimizer-sims" class="select"></select>
                 <p class="field-note small">Fewer = faster but noisier. Re-check the winner at full sims in the Simulator.</p>

@@ -1469,6 +1469,7 @@ function runOptimizeCandidate(plan, allocation, N, Y, data, b, strategy, strat) 
 function computeOptimizeStats(N, Y, b) {
   const cagrReal   = new Array(N);
   const endingReal = new Array(N);
+  const mddInv     = new Array(N);   // investment (no-withdrawal) MDD per sim, negative %
   let successCount = 0;
   let cagrSum = 0, cagrN = 0;
   let endSum = 0;
@@ -1485,7 +1486,12 @@ function computeOptimizeStats(N, Y, b) {
     endingReal[s] = er;
     endSum += er;
 
+    // Real CAGR (Fisher-log) and investment-only MDD in a single pass over the
+    // active years. Investment MDD is peak-to-trough of a hypothetical
+    // no-withdrawal balance path; it's scale-invariant so we start at 1.0.
+    // Mirrors the full engine's max_drawdown_investment_pct (worker ~695-706).
     let cr = null;
+    let nw = 1, peak = 1, maxDD = 0;
     if (activeYears > 0) {
       let logReal = 0;
       for (let t = 0; t < activeYears; t++) {
@@ -1493,11 +1499,16 @@ function computeOptimizeStats(N, Y, b) {
         const rInfl = b.inflationsPct[annBase + t]    / 100;
         const realFactor = (1 + rNom) / (1 + rInfl);
         if (realFactor > 0) logReal += Math.log(realFactor);
+        nw *= 1 + rNom;
+        if (nw > peak) peak = nw;
+        const dd = (peak - nw) / peak;
+        if (dd > maxDD) maxDD = dd;
       }
       cr = (Math.exp(logReal / activeYears) - 1) * 100;
     }
     cagrReal[s] = cr;
     if (cr != null) { cagrSum += cr; cagrN++; }
+    mddInv[s] = -maxDD * 100;
   }
 
   return {
@@ -1506,5 +1517,6 @@ function computeOptimizeStats(N, Y, b) {
     cagr_real_mean:          cagrN > 0 ? cagrSum / cagrN : null,
     ending_wealth_real:      percentileOf(endingReal, 50, 'asc'),
     ending_wealth_real_mean: endSum / N,
+    mdd_investment_median:   percentileOf(mddInv, 50, 'asc'),
   };
 }
