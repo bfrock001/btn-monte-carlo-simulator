@@ -1018,6 +1018,7 @@ const OPTIMIZER_STATE = {
     fiKey: null,           // Step-1 bond proxy
     lockedEquityPct: null, // winning split (% stocks), locked into Step 2
     running: false,        // true while a Step-1 sweep is in flight
+    step2Grid: 5,          // Step-2 sub-class weight grid (5 | 10); 10 only for mult-of-10 splits
   },
 };
 
@@ -1746,7 +1747,16 @@ function rederiveOptimizerStep1() {
    Two-step mode — Step 2: refine within the locked split (c18j)
    ============================================================ */
 
-const OPT_STEP2_STEP = 5;   // sub-class weight grid; 5% divides any 5%-multiple split
+// Step-2 sub-class weight grid, user-selectable (5% or 10%). 5% divides any
+// 5%-multiple split; 10% only divides mult-of-10 splits, so this falls back to 5%
+// when the locked split isn't a multiple of 10 — defense-in-depth beyond the
+// disabled 10% selector option (so an out-of-sync state can never mis-sum a bucket).
+function optimizerStep2Step() {
+  const E = OPTIMIZER_STATE.twostep.lockedEquityPct;
+  const g = OPTIMIZER_STATE.twostep.step2Grid || 5;
+  if (g === 10 && (E == null || E % 10 !== 0)) return 5;
+  return g;
+}
 
 // Partition the optimizer's covered, selected assets into stock / bond buckets.
 // Alternatives are excluded from two-step v1 and reported separately.
@@ -1784,7 +1794,8 @@ function renderOptimizerStep2Shell() {
     `<div id="opt-step2-banner" class="opt-step2-banner" aria-live="polite"></div>` +
     `<p class="opt-step__intro">Now hold that stock/bond split fixed and search for the best mix of ` +
     `specific asset classes <strong>inside each bucket</strong>. Uses the asset classes you selected ` +
-    `above; weights move in ${OPT_STEP2_STEP}% steps so the buckets stay exactly on your split.</p>` +
+    `above; pick a weight grid below and the buckets stay exactly on your split.</p>` +
+    `<div id="opt-step2-gridrow" class="opt-step2-gridrow"></div>` +
     `<div id="opt-step2-caps" class="opt-step2-caps"></div>` +
     `<p id="opt-step2-warning" class="field-warning" hidden></p>` +
     `<div class="optimizer-run-row">` +
@@ -1813,6 +1824,27 @@ function renderOptimizerStep2Controls() {
 
   banner.innerHTML = `Refining within <strong>${E}% stocks / ${F}% bonds</strong> — locked from Step 1.`;
 
+  // Weight-grid selector: 10% only divides mult-of-10 splits, so it's disabled for
+  // an odd-5 split (e.g. 65/35) with a note, and the grid stays at 5%.
+  const tenOk = E != null && E % 10 === 0;
+  if (!tenOk && OPTIMIZER_STATE.twostep.step2Grid === 10) OPTIMIZER_STATE.twostep.step2Grid = 5;
+  const curGrid = optimizerStep2Step();
+  const gridRow = document.getElementById('opt-step2-gridrow');
+  if (gridRow) {
+    gridRow.innerHTML =
+      `<label class="opt-step2-gridrow__lab" for="opt-step2-grid">Weight grid</label>` +
+      `<select id="opt-step2-grid" class="select opt-step2-grid__select">` +
+        `<option value="5"${curGrid === 5 ? ' selected' : ''}>5% steps · finer</option>` +
+        `<option value="10"${curGrid === 10 ? ' selected' : ''}${tenOk ? '' : ' disabled'}>10% steps · fewer portfolios</option>` +
+      `</select>` +
+      (tenOk ? '' : `<span class="field-note small opt-step2-gridrow__note">10% grid needs a split like 70/30 or 60/40 — yours is ${E}/${F}, so it stays at 5%.</span>`);
+    const gsel = document.getElementById('opt-step2-grid');
+    if (gsel) gsel.addEventListener('change', () => {
+      OPTIMIZER_STATE.twostep.step2Grid = parseInt(gsel.value, 10) || 5;
+      renderOptimizerStep2Controls();   // rebuild caps (input step attrs) + preview
+    });
+  }
+
   let html = '';
   html += optimizerStep2BucketBlock('Stocks', E, equityKeys, byKey);
   html += optimizerStep2BucketBlock('Bonds', F, fiKeys, byKey);
@@ -1837,14 +1869,17 @@ function optimizerStep2BucketBlock(label, bucketPct, keys, byKey) {
     const asset = byKey.get(key) || {};
     const cap = OPTIMIZER_STATE.caps[key] || {};
     const minVal = cap.min == null ? '' : cap.min;
-    const maxVal = cap.max == null ? '' : cap.max;
+    // Pre-fill the max at the bucket ceiling (E for stocks, F for bonds) so the
+    // ceiling is visible; stored max stays null so it tracks the split until the
+    // user types a tighter cap. min/max can't exceed the bucket total.
+    const maxVal = cap.max == null ? bucketPct : cap.max;
     return `<div class="optimizer-cap-row" data-group="${groupSlug(asset.group)}">` +
       `<span class="optimizer-cap-row__name">${escapeHtml(asset.name || key)}</span>` +
       `<span class="optimizer-cap-row__field"><label class="optimizer-cap-row__lab" for="opt2-min-${escapeHtml(key)}">min</label>` +
-        `<input id="opt2-min-${escapeHtml(key)}" class="num-input optimizer-cap-input opt2-cap" type="number" min="0" max="100" step="${OPT_STEP2_STEP}" inputmode="numeric" autocomplete="off" placeholder="0" value="${minVal}" data-key="${escapeHtml(key)}" data-bound="min" />` +
+        `<input id="opt2-min-${escapeHtml(key)}" class="num-input optimizer-cap-input opt2-cap" type="number" min="0" max="${bucketPct}" step="${optimizerStep2Step()}" inputmode="numeric" autocomplete="off" placeholder="0" value="${minVal}" data-key="${escapeHtml(key)}" data-bound="min" />` +
         `<span class="optimizer-cap-row__pct">%</span></span>` +
       `<span class="optimizer-cap-row__field"><label class="optimizer-cap-row__lab" for="opt2-max-${escapeHtml(key)}">max</label>` +
-        `<input id="opt2-max-${escapeHtml(key)}" class="num-input optimizer-cap-input opt2-cap" type="number" min="0" max="100" step="${OPT_STEP2_STEP}" inputmode="numeric" autocomplete="off" placeholder="100" value="${maxVal}" data-key="${escapeHtml(key)}" data-bound="max" />` +
+        `<input id="opt2-max-${escapeHtml(key)}" class="num-input optimizer-cap-input opt2-cap" type="number" min="0" max="${bucketPct}" step="${optimizerStep2Step()}" inputmode="numeric" autocomplete="off" placeholder="${bucketPct}" value="${maxVal}" data-key="${escapeHtml(key)}" data-bound="max" />` +
         `<span class="optimizer-cap-row__pct">%</span></span>` +
     `</div>`;
   }).join('');
@@ -1852,12 +1887,22 @@ function optimizerStep2BucketBlock(label, bucketPct, keys, byKey) {
 }
 
 function bindOptimizerStep2CapInputs() {
+  // Per-fund ceiling = its bucket total (stocks → E, bonds → F); a typed min/max
+  // above that is meaningless (the split is locked), so clamp to it.
+  const E = OPTIMIZER_STATE.twostep.lockedEquityPct;
+  const F = E == null ? null : 100 - E;
+  const { equityKeys, fiKeys } = optimizerStep2Buckets();
+  const ceilOf = {};
+  equityKeys.forEach((k) => { ceilOf[k] = E; });
+  fiKeys.forEach((k) => { ceilOf[k] = F; });
   document.querySelectorAll('#opt-step2-caps .opt2-cap').forEach((input) => {
     input.addEventListener('input', () => {
       const key = input.dataset.key, bound = input.dataset.bound;
       if (!OPTIMIZER_STATE.caps[key]) OPTIMIZER_STATE.caps[key] = { min: null, max: null };
       const raw = input.value.trim();
-      OPTIMIZER_STATE.caps[key][bound] = raw === '' ? null : clampPct(parseFloat(raw), null);
+      const parsed = raw === '' ? null : clampPct(parseFloat(raw), null);
+      const ceil = ceilOf[key] != null ? ceilOf[key] : 100;
+      OPTIMIZER_STATE.caps[key][bound] = parsed == null ? null : Math.min(parsed, ceil);
       updateOptimizerStep2Preview();
     });
   });
@@ -1867,7 +1912,7 @@ function bindOptimizerStep2CapInputs() {
 function optimizerStep2BucketCount(keys, targetPct, cap) {
   if (targetPct === 0) return { count: 1, feasible: true, exceeded: false };
   if (keys.length === 0) return { count: 0, feasible: false, exceeded: false };
-  const { m, lo, hi } = optimizerUnitBounds(keys, OPT_STEP2_STEP, targetPct);
+  const { m, lo, hi } = optimizerUnitBounds(keys, optimizerStep2Step(), targetPct);
   return countGridCompositions(lo, hi, m, cap);
 }
 
@@ -1877,8 +1922,8 @@ function optimizerStep2Candidates() {
   if (E == null) return { candidates: [], eqKeys: [], fiKeys: [] };
   const F = 100 - E;
   const { equityKeys, fiKeys } = optimizerStep2Buckets();
-  const eqComps = E === 0 ? [[]] : enumerateGridCompositions(equityKeys, OPT_STEP2_STEP, optimizerCandidateCap(), E);
-  const fiComps = F === 0 ? [[]] : enumerateGridCompositions(fiKeys, OPT_STEP2_STEP, optimizerCandidateCap(), F);
+  const eqComps = E === 0 ? [[]] : enumerateGridCompositions(equityKeys, optimizerStep2Step(), optimizerCandidateCap(), E);
+  const fiComps = F === 0 ? [[]] : enumerateGridCompositions(fiKeys, optimizerStep2Step(), optimizerCandidateCap(), F);
   const candidates = [];
   for (const ec of eqComps) {
     for (const fc of fiComps) {
@@ -1914,7 +1959,7 @@ function updateOptimizerStep2Preview() {
     count = eqCnt.count * fiCnt.count;
     if (eqCnt.exceeded || fiCnt.exceeded || count > optimizerCandidateCap()) {
       canRun = false;
-      warn = `Too many mixes to run at a ${OPT_STEP2_STEP}% grid. Refine fewer sub-classes, or add per-asset limits.`;
+      warn = `Too many mixes to run at a ${optimizerStep2Step()}% grid. Refine fewer sub-classes, or add per-asset limits.`;
     }
   }
 
@@ -1993,10 +2038,10 @@ function finishOptimizerStep2(points, ctx) {
   optimizerStep2Run = { points, plan, floorPct, ddCap, N, keys, elapsedMs, E };
   // Park this as the "last run" so the shared JSON/CSV export path exports it.
   OPTIMIZER_STATE.lastRun = {
-    points, plan, floorPct, ddCap, N, step: OPT_STEP2_STEP, elapsedMs, keys, results: res,
+    points, plan, floorPct, ddCap, N, step: optimizerStep2Step(), elapsedMs, keys, results: res,
     signature: optimizerConfigSignature(),
   };
-  renderOptimizerStep2Results(res, { points, floorPct, ddCap, N, step: OPT_STEP2_STEP, elapsedMs, total: points.length, E });
+  renderOptimizerStep2Results(res, { points, floorPct, ddCap, N, step: optimizerStep2Step(), elapsedMs, total: points.length, E });
 }
 
 // Re-rank the last Step-2 run at the current floor + drawdown cap (no re-sim).
@@ -2010,10 +2055,10 @@ function rederiveOptimizerStep2() {
   const res = computeOptimizerResults(r.points, floorPct, ddCap);
   r.floorPct = floorPct; r.ddCap = ddCap;
   OPTIMIZER_STATE.lastRun = {
-    points: r.points, plan: r.plan, floorPct, ddCap, N: r.N, step: OPT_STEP2_STEP,
+    points: r.points, plan: r.plan, floorPct, ddCap, N: r.N, step: optimizerStep2Step(),
     elapsedMs: r.elapsedMs, keys: r.keys, results: res, signature: optimizerConfigSignature(),
   };
-  renderOptimizerStep2Results(res, { points: r.points, floorPct, ddCap, N: r.N, step: OPT_STEP2_STEP, elapsedMs: r.elapsedMs, total: r.points.length, E: r.E });
+  renderOptimizerStep2Results(res, { points: r.points, floorPct, ddCap, N: r.N, step: optimizerStep2Step(), elapsedMs: r.elapsedMs, total: r.points.length, E: r.E });
 }
 
 function renderOptimizerStep2Results(res, meta) {

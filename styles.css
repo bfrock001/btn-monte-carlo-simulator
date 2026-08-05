@@ -3685,6 +3685,21 @@ em { font-style: italic; }
   height: 320px;
   width: 100%;
 }
+.opt-step2-gridrow {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 4px 0 16px;
+}
+.opt-step2-gridrow__lab {
+  font-family: var(--font-sans);
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--ink);
+}
+.opt-step2-grid__select { max-width: 260px; }
+.opt-step2-gridrow__note { flex-basis: 100%; }
 .opt-step2-bucket { margin-bottom: 14px; }
 .opt-step2-bucket__head {
   font-family: var(--font-sans);
