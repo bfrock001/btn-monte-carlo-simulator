@@ -32,6 +32,13 @@ const PERIOD_LABELS = {
 
 const DATA_URL = './simba_returns_data.json';
 
+// Cache-buster for the Web Worker script. Browsers cache worker scripts hard, so
+// a plain refresh can keep running an OLD engine even after the file changed on
+// disk. Appending a version the workers are loaded with forces a fresh fetch.
+// Bump this whenever simulation.worker.js changes.
+const WORKER_VERSION = 'c18y';
+const WORKER_URL = `./simulation.worker.js?v=${WORKER_VERSION}`;
+
 /* -----------------------------------------------------------
    Boot
    ----------------------------------------------------------- */
@@ -3037,7 +3044,7 @@ function runOptimizeBatch(candidates, plan, N, { onProgress } = {}) {
     slices.forEach((slice, wi) => {
       let w;
       try {
-        w = new Worker('./simulation.worker.js');
+        w = new Worker(WORKER_URL);
       } catch (e) {
         aborted = true;
         cleanup();
@@ -3982,7 +3989,7 @@ const WORKER = {
 function initWorker() {
   if (WORKER.instance) return WORKER.instance;
   try {
-    WORKER.instance = new Worker('./simulation.worker.js');
+    WORKER.instance = new Worker(WORKER_URL);
   } catch (e) {
     showError(
       'Your browser does not support Web Workers, or the simulation engine failed to load. ' +
