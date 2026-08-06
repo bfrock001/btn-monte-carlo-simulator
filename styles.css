@@ -1836,6 +1836,20 @@ em { font-style: italic; }
 }
 .income-card .field-row { margin-bottom: 0; }
 .income-card .toggle-row { padding: 8px 0 0; }
+/* Spouse A / Spouse B sub-labels inside an income card. */
+.income-spouse-label {
+  font-family: var(--font-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--faint);
+  margin: 0 0 5px;
+}
+/* Add breathing room above the second spouse's block. */
+.income-card .field-row + .income-spouse-label,
+.income-card .toggle-row + .income-spouse-label { margin-top: 12px; }
+.income-spouse-opt { font-weight: 400; text-transform: none; letter-spacing: 0; }
 
 .net-draw {
   margin-top: 16px;

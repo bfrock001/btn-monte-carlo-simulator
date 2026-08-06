@@ -2379,9 +2379,12 @@ function getSimulatorPlanForOptimizer() {
     sor_force_2008:      INPUT_STATE.sor_force_2008,
     inflation_adjust:    INPUT_STATE.inflation_adjust,
     expense_mode:        'annual',
-    ss:      { ...INPUT_STATE.ss },
-    pension: { ...INPUT_STATE.pension },
-    annuity: { ...INPUT_STATE.annuity },
+    spouse_b_age:        INPUT_STATE.spouse_b_age,
+    ss:        { ...INPUT_STATE.ss },
+    pension:   { ...INPUT_STATE.pension },
+    ss_b:      { ...INPUT_STATE.ss_b },
+    pension_b: { ...INPUT_STATE.pension_b },
+    annuity:   { ...INPUT_STATE.annuity },
     buckets: buckets.map((b) => ({ expense: b.expense || 0 })),
     distribution_strategy:     INPUT_STATE.distribution_strategy,
     minimum_withdrawal_annual: INPUT_STATE.minimum_withdrawal_annual,
@@ -3790,6 +3793,7 @@ const ASSET_GROUPS_FOR_DROPDOWN = ['US Equity', 'International Equity', 'Fixed I
 
 const DEFAULTS = {
   current_age: 60,
+  spouse_b_age: 60,   // Spouse B's current age; their SS/pension start relative to it
   period_years: 30,
   n_simulations: 10000,
   historical_period: 'modern',
@@ -3807,9 +3811,13 @@ const DEFAULTS = {
     { key: '',           pct: 0 },
     { key: '',           pct: 0 },
   ],
-  ss:      { amount: 0, start_age: 67 },
-  pension: { amount: 0, start_age: 65, cola: false },
-  annuity: { amount: 0, start_age: 65, stop_age: null, cola: false }, // stop_age null = lifetime
+  // Guaranteed income streams. ss/pension = Spouse A (primary); ss_b/pension_b =
+  // Spouse B, whose start ages resolve against spouse_b_age, not current_age.
+  ss:        { amount: 0, start_age: 67 },
+  pension:   { amount: 0, start_age: 65, cola: false },
+  ss_b:      { amount: 0, start_age: 67 },
+  pension_b: { amount: 0, start_age: 65, cola: false },
+  annuity:   { amount: 0, start_age: 65, stop_age: null, cola: false }, // stop_age null = lifetime
   // Buckets — one expense per 5 years. Default first bucket is blank;
   // user must enter at least bucket 1 expense before Run enables.
   bucket1_default_expense: 0,
@@ -3830,6 +3838,7 @@ const DEFAULTS = {
 // Mutable working state for the form
 const INPUT_STATE = {
   current_age: DEFAULTS.current_age,
+  spouse_b_age: DEFAULTS.spouse_b_age,
   period_years: DEFAULTS.period_years,
   n_simulations: DEFAULTS.n_simulations,
   historical_period: DEFAULTS.historical_period,
@@ -3842,9 +3851,11 @@ const INPUT_STATE = {
   expenses_uniform: true,            // when true, all buckets sync to Bucket 1
   initial_balance: DEFAULTS.initial_balance,
   allocations: DEFAULTS.allocations.map((a) => ({ ...a })),
-  ss:      { ...DEFAULTS.ss },
-  pension: { ...DEFAULTS.pension },
-  annuity: { ...DEFAULTS.annuity },
+  ss:        { ...DEFAULTS.ss },
+  pension:   { ...DEFAULTS.pension },
+  ss_b:      { ...DEFAULTS.ss_b },
+  pension_b: { ...DEFAULTS.pension_b },
+  annuity:   { ...DEFAULTS.annuity },
   buckets: [], // [{ expense, manual }]
   // Distribution Strategy
   distribution_strategy: DEFAULTS.distribution_strategy,
@@ -3941,6 +3952,10 @@ function buildStartAgeDropdowns() {
   fillAgeOptions(pension, 50, 80, DEFAULTS.pension.start_age);
   fillAgeOptions(annuity, 50, 90, DEFAULTS.annuity.start_age);
   fillStopAgeOptions(document.getElementById('annuity-stop-age'), 50, 95, DEFAULTS.annuity.stop_age);
+  // Spouse B: their own current age + SS/pension start ages.
+  fillAgeOptions(document.getElementById('spouse-b-age'),        40, 80, DEFAULTS.spouse_b_age);
+  fillAgeOptions(document.getElementById('ss-b-start-age'),      62, 70, DEFAULTS.ss_b.start_age);
+  fillAgeOptions(document.getElementById('pension-b-start-age'), 50, 80, DEFAULTS.pension_b.start_age);
 }
 
 // Like fillAgeOptions but with a leading "Lifetime" (value "") for streams that
@@ -4351,6 +4366,12 @@ function syncSimpleInputsFromState() {
   setVal('pension-amount', formatCurrency(INPUT_STATE.pension.amount));
   setVal('pension-start-age', INPUT_STATE.pension.start_age);
   setChecked('pension-cola',   INPUT_STATE.pension.cola);
+  setVal('spouse-b-age',        INPUT_STATE.spouse_b_age);
+  setVal('ss-b-amount',         formatCurrency(INPUT_STATE.ss_b.amount));
+  setVal('ss-b-start-age',      INPUT_STATE.ss_b.start_age);
+  setVal('pension-b-amount',    formatCurrency(INPUT_STATE.pension_b.amount));
+  setVal('pension-b-start-age', INPUT_STATE.pension_b.start_age);
+  setChecked('pension-b-cola',  INPUT_STATE.pension_b.cola);
   setVal('annuity-amount', formatCurrency(INPUT_STATE.annuity.amount));
   setVal('annuity-start-age', INPUT_STATE.annuity.start_age);
   setVal('annuity-stop-age',  INPUT_STATE.annuity.stop_age == null ? '' : INPUT_STATE.annuity.stop_age);
@@ -4494,6 +4515,28 @@ function bindInputEvents() {
   });
   document.getElementById('pension-cola')?.addEventListener('change', (e) => {
     INPUT_STATE.pension.cola = e.target.checked;
+    refreshAllDerived();
+  });
+
+  // Spouse B: current age + their own SS / pension.
+  document.getElementById('spouse-b-age')?.addEventListener('change', (e) => {
+    INPUT_STATE.spouse_b_age = parseInt(e.target.value, 10) || DEFAULTS.spouse_b_age;
+    refreshAllDerived();
+  });
+  const ssBAmt = document.getElementById('ss-b-amount');
+  if (ssBAmt) attachCurrencyHandlers(ssBAmt, (raw) => { INPUT_STATE.ss_b.amount = raw; refreshAllDerived(); });
+  document.getElementById('ss-b-start-age')?.addEventListener('change', (e) => {
+    INPUT_STATE.ss_b.start_age = parseInt(e.target.value, 10) || DEFAULTS.ss_b.start_age;
+    refreshAllDerived();
+  });
+  const pensBAmt = document.getElementById('pension-b-amount');
+  if (pensBAmt) attachCurrencyHandlers(pensBAmt, (raw) => { INPUT_STATE.pension_b.amount = raw; refreshAllDerived(); });
+  document.getElementById('pension-b-start-age')?.addEventListener('change', (e) => {
+    INPUT_STATE.pension_b.start_age = parseInt(e.target.value, 10) || DEFAULTS.pension_b.start_age;
+    refreshAllDerived();
+  });
+  document.getElementById('pension-b-cola')?.addEventListener('change', (e) => {
+    INPUT_STATE.pension_b.cola = e.target.checked;
     refreshAllDerived();
   });
 
@@ -4656,10 +4699,13 @@ function refreshNetDraw() {
   const bucket1 = INPUT_STATE.buckets[0]?.expense || 0;
   const annualExpense = bucket1; // already stored as annual
 
-  const age = INPUT_STATE.current_age + 1; // year 1
+  const age = INPUT_STATE.current_age + 1; // year 1 (Spouse A)
+  const ageB = INPUT_STATE.spouse_b_age + 1; // year 1 (Spouse B)
   let income = 0;
-  if (INPUT_STATE.ss.amount      > 0 && age >= INPUT_STATE.ss.start_age)      income += INPUT_STATE.ss.amount;
-  if (INPUT_STATE.pension.amount > 0 && age >= INPUT_STATE.pension.start_age) income += INPUT_STATE.pension.amount;
+  if (INPUT_STATE.ss.amount        > 0 && age  >= INPUT_STATE.ss.start_age)        income += INPUT_STATE.ss.amount;
+  if (INPUT_STATE.pension.amount   > 0 && age  >= INPUT_STATE.pension.start_age)   income += INPUT_STATE.pension.amount;
+  if (INPUT_STATE.ss_b.amount      > 0 && ageB >= INPUT_STATE.ss_b.start_age)      income += INPUT_STATE.ss_b.amount;
+  if (INPUT_STATE.pension_b.amount > 0 && ageB >= INPUT_STATE.pension_b.start_age) income += INPUT_STATE.pension_b.amount;
   if (INPUT_STATE.annuity.amount > 0 && age >= INPUT_STATE.annuity.start_age &&
       (INPUT_STATE.annuity.stop_age == null || age <= INPUT_STATE.annuity.stop_age)) income += INPUT_STATE.annuity.amount;
 
@@ -5076,8 +5122,15 @@ function buildExportRow(results, userLabel) {
     lifetime_real_spending_p10:   lifetimeP10,
     lifetime_real_spending_p50:   lifetimeP50,
     lifetime_real_spending_p90:   lifetimeP90,
+    spouse_b_age:                 inp.spouse_b_age ?? null,
     ss_amount:                    inp.ss?.amount || 0,
+    ss_start_age:                 inp.ss?.start_age ?? null,
     pension_amount:               inp.pension?.amount || 0,
+    pension_start_age:            inp.pension?.start_age ?? null,
+    ss_b_amount:                  inp.ss_b?.amount || 0,
+    ss_b_start_age:               inp.ss_b?.start_age ?? null,
+    pension_b_amount:             inp.pension_b?.amount || 0,
+    pension_b_start_age:          inp.pension_b?.start_age ?? null,
     annuity_amount:               inp.annuity?.amount || 0,
     annuity_start_age:            inp.annuity?.start_age ?? null,
     annuity_stop_age:             inp.annuity?.stop_age ?? null,  // null = lifetime
@@ -5234,8 +5287,14 @@ function downloadPDF() {
       const lifeP50 = sumOf(lastResults.income_percentile_paths?.real_p50);
 
       const incomeRow = [];
-      if (inp.ss.amount > 0)      incomeRow.push(`SS ${fmtMoney(inp.ss.amount)}`);
-      if (inp.pension.amount > 0) incomeRow.push(`Pension ${fmtMoney(inp.pension.amount)}`);
+      // Tag streams A/B only when Spouse B is actually in play, so single-filer
+      // PDFs stay clean ("SS $30,000" rather than "SS (A) $30,000").
+      const hasSpouseB = (inp.ss_b?.amount > 0) || (inp.pension_b?.amount > 0);
+      const aTag = hasSpouseB ? ' (A)' : '';
+      if (inp.ss.amount > 0)      incomeRow.push(`SS${aTag} ${fmtMoney(inp.ss.amount)}`);
+      if (inp.pension.amount > 0) incomeRow.push(`Pension${aTag} ${fmtMoney(inp.pension.amount)}`);
+      if (inp.ss_b?.amount > 0)      incomeRow.push(`SS (B) ${fmtMoney(inp.ss_b.amount)}`);
+      if (inp.pension_b?.amount > 0) incomeRow.push(`Pension (B) ${fmtMoney(inp.pension_b.amount)}`);
       if (inp.annuity.amount > 0) {
         const annWindow = inp.annuity.stop_age != null
           ? ` (age ${inp.annuity.start_age}–${inp.annuity.stop_age})`
@@ -5624,9 +5683,12 @@ function updateGKPreview() {
   }
   // Year-1 income — only counts streams whose start age has been reached at year 1 (age = current_age + 1)
   const age1 = INPUT_STATE.current_age + 1;
+  const age1B = INPUT_STATE.spouse_b_age + 1;
   let income = 0;
-  if (INPUT_STATE.ss.amount      > 0 && age1 >= INPUT_STATE.ss.start_age)      income += INPUT_STATE.ss.amount;
-  if (INPUT_STATE.pension.amount > 0 && age1 >= INPUT_STATE.pension.start_age) income += INPUT_STATE.pension.amount;
+  if (INPUT_STATE.ss.amount        > 0 && age1  >= INPUT_STATE.ss.start_age)        income += INPUT_STATE.ss.amount;
+  if (INPUT_STATE.pension.amount   > 0 && age1  >= INPUT_STATE.pension.start_age)   income += INPUT_STATE.pension.amount;
+  if (INPUT_STATE.ss_b.amount      > 0 && age1B >= INPUT_STATE.ss_b.start_age)      income += INPUT_STATE.ss_b.amount;
+  if (INPUT_STATE.pension_b.amount > 0 && age1B >= INPUT_STATE.pension_b.start_age) income += INPUT_STATE.pension_b.amount;
   if (INPUT_STATE.annuity.amount > 0 && age1 >= INPUT_STATE.annuity.start_age &&
       (INPUT_STATE.annuity.stop_age == null || age1 <= INPUT_STATE.annuity.stop_age)) income += INPUT_STATE.annuity.amount;
   const net = Math.max(0, expense - income);
@@ -5809,10 +5871,13 @@ function runSimulationFromInputs() {
     sor_force_2008:       INPUT_STATE.sor_force_2008,
     inflation_adjust:     INPUT_STATE.inflation_adjust,
     expense_mode:         'annual', // we always store annualized expenses
+    spouse_b_age:         INPUT_STATE.spouse_b_age,
     allocations,
-    ss:      { ...INPUT_STATE.ss },
-    pension: { ...INPUT_STATE.pension },
-    annuity: { ...INPUT_STATE.annuity },
+    ss:        { ...INPUT_STATE.ss },
+    pension:   { ...INPUT_STATE.pension },
+    ss_b:      { ...INPUT_STATE.ss_b },
+    pension_b: { ...INPUT_STATE.pension_b },
+    annuity:   { ...INPUT_STATE.annuity },
     buckets: INPUT_STATE.buckets.map((b) => ({ expense: b.expense || 0 })),
     // Distribution Strategy (v1.1 + v1.2)
     distribution_strategy:     INPUT_STATE.distribution_strategy,
@@ -5839,6 +5904,7 @@ function resetToDefaults() {
   if (!confirm('Are you sure you want to reset all inputs?')) return;
   // Reset INPUT_STATE
   INPUT_STATE.current_age        = DEFAULTS.current_age;
+  INPUT_STATE.spouse_b_age       = DEFAULTS.spouse_b_age;
   INPUT_STATE.period_years       = DEFAULTS.period_years;
   INPUT_STATE.n_simulations      = DEFAULTS.n_simulations;
   INPUT_STATE.historical_period  = DEFAULTS.historical_period;
@@ -5851,9 +5917,11 @@ function resetToDefaults() {
   INPUT_STATE.expenses_uniform   = true;
   INPUT_STATE.initial_balance    = DEFAULTS.initial_balance;
   INPUT_STATE.allocations        = DEFAULTS.allocations.map((a) => ({ ...a }));
-  INPUT_STATE.ss      = { ...DEFAULTS.ss };
-  INPUT_STATE.pension = { ...DEFAULTS.pension };
-  INPUT_STATE.annuity = { ...DEFAULTS.annuity };
+  INPUT_STATE.ss        = { ...DEFAULTS.ss };
+  INPUT_STATE.pension   = { ...DEFAULTS.pension };
+  INPUT_STATE.ss_b      = { ...DEFAULTS.ss_b };
+  INPUT_STATE.pension_b = { ...DEFAULTS.pension_b };
+  INPUT_STATE.annuity   = { ...DEFAULTS.annuity };
   INPUT_STATE.buckets = buildBucketsArray(INPUT_STATE.period_years, null);
   // Distribution Strategy
   INPUT_STATE.distribution_strategy   = DEFAULTS.distribution_strategy;
@@ -6354,8 +6422,8 @@ function renderIncomeFanChart(results, mode) {
   const noteEl = document.getElementById('income-chart-sources-note');
   if (noteEl) {
     const inp = results.inputs_summary;
-    const hasSS      = INPUT_STATE.ss.amount      > 0;
-    const hasPension = INPUT_STATE.pension.amount > 0;
+    const hasSS      = INPUT_STATE.ss.amount > 0 || INPUT_STATE.ss_b.amount > 0;
+    const hasPension = INPUT_STATE.pension.amount > 0 || INPUT_STATE.pension_b.amount > 0;
     const hasAnnuity = INPUT_STATE.annuity.amount > 0;
     const sources = [];
     if (hasSS)      sources.push('Social Security');

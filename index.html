@@ -409,9 +409,19 @@
           <h2 class="section-title">Income Sources</h2>
           <p class="field-note">All amounts in today&rsquo;s dollars. Each stream is netted against expenses each year; any surplus is added back to the portfolio.</p>
 
+          <!-- Spouse B age (only relevant for couples) -->
+          <div class="field-row">
+            <div class="field">
+              <label class="field-label small" for="spouse-b-age">Spouse B &mdash; current age</label>
+              <select id="spouse-b-age" class="select"></select>
+            </div>
+          </div>
+          <p class="field-note small">Only used if you enter Spouse B benefits below &mdash; their Social Security and pension start relative to <em>this</em> age. Leave it if you&rsquo;re modeling one person.</p>
+
           <!-- Social Security -->
           <div class="income-card">
             <h3 class="income-title">Social Security</h3>
+            <div class="income-spouse-label small">You / Spouse A</div>
             <div class="field-row">
               <div class="field">
                 <label class="field-label small" for="ss-amount">Annual Amount</label>
@@ -422,12 +432,24 @@
                 <select id="ss-start-age" class="select"></select>
               </div>
             </div>
-            <p class="field-note small">SS always receives an annual COLA equal to the bootstrap year&rsquo;s inflation.</p>
+            <div class="income-spouse-label small">Spouse B <span class="income-spouse-opt">(optional)</span></div>
+            <div class="field-row">
+              <div class="field">
+                <label class="field-label small" for="ss-b-amount">Annual Amount</label>
+                <input type="text" id="ss-b-amount" class="currency-input" inputmode="numeric" autocomplete="off" value="$0" />
+              </div>
+              <div class="field">
+                <label class="field-label small" for="ss-b-start-age">Start Age</label>
+                <select id="ss-b-start-age" class="select"></select>
+              </div>
+            </div>
+            <p class="field-note small">SS always receives an annual COLA equal to the bootstrap year&rsquo;s inflation. Each spouse&rsquo;s Start Age is their own claiming age.</p>
           </div>
 
           <!-- Pension -->
           <div class="income-card">
             <h3 class="income-title">Pension</h3>
+            <div class="income-spouse-label small">You / Spouse A</div>
             <div class="field-row">
               <div class="field">
                 <label class="field-label small" for="pension-amount">Annual Amount</label>
@@ -440,11 +462,32 @@
             </div>
             <label class="toggle-row" for="pension-cola">
               <span class="toggle-text">
-                <span class="toggle-title small">Includes COLA?</span>
+                <span class="toggle-title small">Spouse A pension COLA?</span>
                 <span class="toggle-hint">If on, pension is inflated annually like Social Security.</span>
               </span>
               <span class="toggle">
                 <input type="checkbox" id="pension-cola" />
+                <span class="toggle-track"><span class="toggle-thumb"></span></span>
+              </span>
+            </label>
+            <div class="income-spouse-label small">Spouse B <span class="income-spouse-opt">(optional)</span></div>
+            <div class="field-row">
+              <div class="field">
+                <label class="field-label small" for="pension-b-amount">Annual Amount</label>
+                <input type="text" id="pension-b-amount" class="currency-input" inputmode="numeric" autocomplete="off" value="$0" />
+              </div>
+              <div class="field">
+                <label class="field-label small" for="pension-b-start-age">Start Age</label>
+                <select id="pension-b-start-age" class="select"></select>
+              </div>
+            </div>
+            <label class="toggle-row" for="pension-b-cola">
+              <span class="toggle-text">
+                <span class="toggle-title small">Spouse B pension COLA?</span>
+                <span class="toggle-hint">If on, Spouse B&rsquo;s pension is inflated annually.</span>
+              </span>
+              <span class="toggle">
+                <input type="checkbox" id="pension-b-cola" />
                 <span class="toggle-track"><span class="toggle-thumb"></span></span>
               </span>
             </label>

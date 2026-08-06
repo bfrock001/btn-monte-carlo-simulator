@@ -356,17 +356,28 @@ function runOneSim(ctx) {
     // 2. Guaranteed income (SS / pension / annuity). All amounts in today's $.
     //    Computed first because G-K's guardrail rate uses NET portfolio draw
     //    (gross expense − income) / portfolio.
-    const age = inputs.current_age + t;
-    const ss      = inputs.ss      || { amount: 0, start_age: 67 };
-    const pension = inputs.pension || { amount: 0, start_age: 65, cola: false };
-    const annuity = inputs.annuity || { amount: 0, start_age: 65, stop_age: null, cola: false };
+    const age = inputs.current_age + t;                          // Spouse A age this year
+    const ageB = (inputs.spouse_b_age || inputs.current_age) + t; // Spouse B age this year
+    const ss        = inputs.ss        || { amount: 0, start_age: 67 };
+    const pension   = inputs.pension   || { amount: 0, start_age: 65, cola: false };
+    const ssB       = inputs.ss_b      || { amount: 0, start_age: 67 };
+    const pensionB  = inputs.pension_b || { amount: 0, start_age: 65, cola: false };
+    const annuity   = inputs.annuity   || { amount: 0, start_age: 65, stop_age: null, cola: false };
 
     let income = 0;
+    // Spouse A — start ages resolve against `age`.
     if (ss.amount > 0 && age >= ss.start_age) {
       income += ss.amount * inflationIndex; // SS always COLA = inflation
     }
     if (pension.amount > 0 && age >= pension.start_age) {
       income += pension.cola ? pension.amount * inflationIndex : pension.amount;
+    }
+    // Spouse B — start ages resolve against `ageB` (their own timeline).
+    if (ssB.amount > 0 && ageB >= ssB.start_age) {
+      income += ssB.amount * inflationIndex; // SS always COLA = inflation
+    }
+    if (pensionB.amount > 0 && ageB >= pensionB.start_age) {
+      income += pensionB.cola ? pensionB.amount * inflationIndex : pensionB.amount;
     }
     // Annuity pays from start_age through stop_age inclusive (stop_age null = for life).
     if (annuity.amount > 0 && age >= annuity.start_age &&
