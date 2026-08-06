@@ -359,7 +359,7 @@ function runOneSim(ctx) {
     const age = inputs.current_age + t;
     const ss      = inputs.ss      || { amount: 0, start_age: 67 };
     const pension = inputs.pension || { amount: 0, start_age: 65, cola: false };
-    const annuity = inputs.annuity || { amount: 0, start_age: 65, cola: false };
+    const annuity = inputs.annuity || { amount: 0, start_age: 65, stop_age: null, cola: false };
 
     let income = 0;
     if (ss.amount > 0 && age >= ss.start_age) {
@@ -368,7 +368,9 @@ function runOneSim(ctx) {
     if (pension.amount > 0 && age >= pension.start_age) {
       income += pension.cola ? pension.amount * inflationIndex : pension.amount;
     }
-    if (annuity.amount > 0 && age >= annuity.start_age) {
+    // Annuity pays from start_age through stop_age inclusive (stop_age null = for life).
+    if (annuity.amount > 0 && age >= annuity.start_age &&
+        (annuity.stop_age == null || age <= annuity.stop_age)) {
       income += annuity.cola ? annuity.amount * inflationIndex : annuity.amount;
     }
 

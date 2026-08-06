@@ -3809,7 +3809,7 @@ const DEFAULTS = {
   ],
   ss:      { amount: 0, start_age: 67 },
   pension: { amount: 0, start_age: 65, cola: false },
-  annuity: { amount: 0, start_age: 65, cola: false },
+  annuity: { amount: 0, start_age: 65, stop_age: null, cola: false }, // stop_age null = lifetime
   // Buckets — one expense per 5 years. Default first bucket is blank;
   // user must enter at least bucket 1 expense before Run enables.
   bucket1_default_expense: 0,
@@ -3940,6 +3940,26 @@ function buildStartAgeDropdowns() {
   fillAgeOptions(ss,      62, 70, DEFAULTS.ss.start_age);
   fillAgeOptions(pension, 50, 80, DEFAULTS.pension.start_age);
   fillAgeOptions(annuity, 50, 90, DEFAULTS.annuity.start_age);
+  fillStopAgeOptions(document.getElementById('annuity-stop-age'), 50, 95, DEFAULTS.annuity.stop_age);
+}
+
+// Like fillAgeOptions but with a leading "Lifetime" (value "") for streams that
+// can end — a null/blank selection means "pays for life" (no stop).
+function fillStopAgeOptions(sel, min, max, selectedVal) {
+  if (!sel) return;
+  sel.innerHTML = '';
+  const life = document.createElement('option');
+  life.value = '';
+  life.textContent = 'Lifetime';
+  if (selectedVal == null) life.selected = true;
+  sel.appendChild(life);
+  for (let a = min; a <= max; a++) {
+    const opt = document.createElement('option');
+    opt.value = a;
+    opt.textContent = a;
+    if (a === selectedVal) opt.selected = true;
+    sel.appendChild(opt);
+  }
 }
 
 function fillAgeOptions(sel, min, max, defaultVal) {
@@ -4333,6 +4353,7 @@ function syncSimpleInputsFromState() {
   setChecked('pension-cola',   INPUT_STATE.pension.cola);
   setVal('annuity-amount', formatCurrency(INPUT_STATE.annuity.amount));
   setVal('annuity-start-age', INPUT_STATE.annuity.start_age);
+  setVal('annuity-stop-age',  INPUT_STATE.annuity.stop_age == null ? '' : INPUT_STATE.annuity.stop_age);
   setChecked('annuity-cola',   INPUT_STATE.annuity.cola);
 
   // Strategy
@@ -4480,6 +4501,19 @@ function bindInputEvents() {
   if (annAmt) attachCurrencyHandlers(annAmt, (raw) => { INPUT_STATE.annuity.amount = raw; refreshAllDerived(); });
   document.getElementById('annuity-start-age')?.addEventListener('change', (e) => {
     INPUT_STATE.annuity.start_age = parseInt(e.target.value, 10) || DEFAULTS.annuity.start_age;
+    // A stop age that's now before the start age would pay nothing — reset it to
+    // Lifetime and reflect that in the select so the state can't be inconsistent.
+    if (INPUT_STATE.annuity.stop_age != null && INPUT_STATE.annuity.stop_age < INPUT_STATE.annuity.start_age) {
+      INPUT_STATE.annuity.stop_age = null;
+      setVal('annuity-stop-age', '');
+    }
+    refreshAllDerived();
+  });
+  document.getElementById('annuity-stop-age')?.addEventListener('change', (e) => {
+    const v = parseInt(e.target.value, 10);
+    // Blank ("Lifetime") or a value before the start age ⇒ no stop (lifetime).
+    INPUT_STATE.annuity.stop_age = (Number.isFinite(v) && v >= INPUT_STATE.annuity.start_age) ? v : null;
+    if (INPUT_STATE.annuity.stop_age == null && e.target.value !== '') setVal('annuity-stop-age', '');
     refreshAllDerived();
   });
   document.getElementById('annuity-cola')?.addEventListener('change', (e) => {
@@ -4626,7 +4660,8 @@ function refreshNetDraw() {
   let income = 0;
   if (INPUT_STATE.ss.amount      > 0 && age >= INPUT_STATE.ss.start_age)      income += INPUT_STATE.ss.amount;
   if (INPUT_STATE.pension.amount > 0 && age >= INPUT_STATE.pension.start_age) income += INPUT_STATE.pension.amount;
-  if (INPUT_STATE.annuity.amount > 0 && age >= INPUT_STATE.annuity.start_age) income += INPUT_STATE.annuity.amount;
+  if (INPUT_STATE.annuity.amount > 0 && age >= INPUT_STATE.annuity.start_age &&
+      (INPUT_STATE.annuity.stop_age == null || age <= INPUT_STATE.annuity.stop_age)) income += INPUT_STATE.annuity.amount;
 
   const net = annualExpense - income;
 
@@ -5044,6 +5079,8 @@ function buildExportRow(results, userLabel) {
     ss_amount:                    inp.ss?.amount || 0,
     pension_amount:               inp.pension?.amount || 0,
     annuity_amount:               inp.annuity?.amount || 0,
+    annuity_start_age:            inp.annuity?.start_age ?? null,
+    annuity_stop_age:             inp.annuity?.stop_age ?? null,  // null = lifetime
     sor_active:                   !!inp.sequence_of_returns,
     sor_force_2008:               !!inp.sor_force_2008,
     allocation_summary:           getAllocationSummary(),
@@ -5199,7 +5236,12 @@ function downloadPDF() {
       const incomeRow = [];
       if (inp.ss.amount > 0)      incomeRow.push(`SS ${fmtMoney(inp.ss.amount)}`);
       if (inp.pension.amount > 0) incomeRow.push(`Pension ${fmtMoney(inp.pension.amount)}`);
-      if (inp.annuity.amount > 0) incomeRow.push(`Annuity ${fmtMoney(inp.annuity.amount)}`);
+      if (inp.annuity.amount > 0) {
+        const annWindow = inp.annuity.stop_age != null
+          ? ` (age ${inp.annuity.start_age}–${inp.annuity.stop_age})`
+          : '';
+        incomeRow.push(`Annuity ${fmtMoney(inp.annuity.amount)}${annWindow}`);
+      }
       const incomeStr = incomeRow.length ? incomeRow.join(' / ') : 'None';
       const sorStr = inp.sequence_of_returns
         ? (inp.sor_force_2008 ? 'On (forced 2008)' : 'On (worst year)')
@@ -5585,7 +5627,8 @@ function updateGKPreview() {
   let income = 0;
   if (INPUT_STATE.ss.amount      > 0 && age1 >= INPUT_STATE.ss.start_age)      income += INPUT_STATE.ss.amount;
   if (INPUT_STATE.pension.amount > 0 && age1 >= INPUT_STATE.pension.start_age) income += INPUT_STATE.pension.amount;
-  if (INPUT_STATE.annuity.amount > 0 && age1 >= INPUT_STATE.annuity.start_age) income += INPUT_STATE.annuity.amount;
+  if (INPUT_STATE.annuity.amount > 0 && age1 >= INPUT_STATE.annuity.start_age &&
+      (INPUT_STATE.annuity.stop_age == null || age1 <= INPUT_STATE.annuity.stop_age)) income += INPUT_STATE.annuity.amount;
   const net = Math.max(0, expense - income);
   const u = INPUT_STATE.strategy_params.upper_guardrail_pct;
   const l = INPUT_STATE.strategy_params.lower_guardrail_pct;
