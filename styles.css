@@ -3347,6 +3347,8 @@ em { font-style: italic; }
   font-weight: 600;
 }
 .optimizer-preview__est { color: var(--faint); }
+/* "N over the 10,000 limit" — clay so it reads as the blocking number to fix. */
+.optimizer-over { color: var(--clay); font-weight: 600; }
 .optimizer-run-row .btn-primary { min-width: 160px; }
 
 /* Inline one-click fix inside the warning (e.g. "Switch to 25% step") */

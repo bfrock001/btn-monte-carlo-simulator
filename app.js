@@ -983,6 +983,15 @@ const OPTIMIZER_SIMS_OPTIONS  = [1000, 2000, 5000, 10000];
 // shrinking the search. optimizerCandidateCap() returns this so every call site
 // stays stable.
 const OPTIMIZER_PORTFOLIO_CAP  = 10000;  // fixed portfolio ceiling per run
+// Results tables always show at least this many portfolios (padded past the
+// efficient frontier with the next-highest-CAGR mixes) so the user gets a real
+// short-list to compare, even when the frontier itself collapses to 1–2 rows.
+const OPTIMIZER_TABLE_MIN_ROWS  = 10;
+// When a search is over the cap we recount up to this higher ceiling so the
+// preview can tell the user *how many* they're over by (e.g. "12,480 — 2,480
+// over the 10,000 limit"), instead of a bare "10,000+". Counting stops here, so
+// a wildly-wide grid reads "100,000+ — 90,000+ over" rather than hanging.
+const OPTIMIZER_COUNT_CEILING   = 100000;
 const OPTIMIZER_WARN_MS         = 20000; // soft warning above ~20s estimated runtime
 // Rough per-sim-year cost (ms) used only for the runtime estimate. Calibrated
 // against measured throughput (~0.0002 ms/sim-year/core: 1,001 portfolios ×
@@ -1030,6 +1039,24 @@ const OPTIMIZER_MODE_KEY    = 'btn-mcsim-optimizer-mode';
 // warning in updateOptimizer*Preview do the "this run will be slow" messaging.
 function optimizerCandidateCap() {
   return OPTIMIZER_PORTFOLIO_CAP;
+}
+
+// Build the "how many over the limit" note for the preview, given a bounded total
+// count and whether counting hit OPTIMIZER_COUNT_CEILING (bailed = true means the
+// real total is even higher). Used by both optimizer modes.
+function optimizerOverLimitNote(total, bailed) {
+  const cap = optimizerCandidateCap();
+  if (bailed) {
+    return {
+      totalStr: `${OPTIMIZER_COUNT_CEILING.toLocaleString('en-US')}+`,
+      overStr:  `${(OPTIMIZER_COUNT_CEILING - cap).toLocaleString('en-US')}+ over the ${cap.toLocaleString('en-US')} limit`,
+    };
+  }
+  const over = Math.max(0, total - cap);
+  return {
+    totalStr: total.toLocaleString('en-US'),
+    overStr:  `${over.toLocaleString('en-US')} over the ${cap.toLocaleString('en-US')} limit`,
+  };
 }
 
 /* ---- Optimizer's own asset universe (add/delete), independent of the Data tab.
@@ -1968,7 +1995,7 @@ function updateOptimizerStep2Preview() {
   const { plan, hasSpending } = getSimulatorPlanForOptimizer();
   const { equityKeys, fiKeys } = optimizerStep2Buckets();
 
-  let warn = '', canRun = true, count = 0;
+  let warn = '', canRun = true, count = 0, overNote = null;
   const eqCnt = optimizerStep2BucketCount(equityKeys, E || 0, optimizerCandidateCap());
   const fiCnt = optimizerStep2BucketCount(fiKeys, F || 0, optimizerCandidateCap());
 
@@ -1980,7 +2007,14 @@ function updateOptimizerStep2Preview() {
     count = eqCnt.count * fiCnt.count;
     if (eqCnt.exceeded || fiCnt.exceeded || count > optimizerCandidateCap()) {
       canRun = false;
-      warn = `Too many mixes to run at a ${optimizerStep2Step()}% grid. Refine fewer sub-classes, or add per-asset limits.`;
+      // Recount each bucket to a higher ceiling so we can report how far over the
+      // cap the split is (buckets are small, so the product is exact well past 10k).
+      const eqHi = optimizerStep2BucketCount(equityKeys, E || 0, OPTIMIZER_COUNT_CEILING);
+      const fiHi = optimizerStep2BucketCount(fiKeys, F || 0, OPTIMIZER_COUNT_CEILING);
+      const total = eqHi.count * fiHi.count;
+      const bailed = eqHi.exceeded || fiHi.exceeded || total > OPTIMIZER_COUNT_CEILING;
+      overNote = optimizerOverLimitNote(Math.min(total, OPTIMIZER_COUNT_CEILING), bailed);
+      warn = `Too many mixes to run at a ${optimizerStep2Step()}% grid. Refine fewer sub-classes, add per-asset limits, or use a coarser grid.`;
     }
   }
 
@@ -1992,6 +2026,9 @@ function updateOptimizerStep2Preview() {
     previewEl.innerHTML =
       `<strong>${count.toLocaleString('en-US')}</strong> portfolio${count === 1 ? '' : 's'}` +
       ` · <span class="optimizer-preview__est">${estStr} on ${OPTIMIZER_STATE.poolSize} core${OPTIMIZER_STATE.poolSize === 1 ? '' : 's'}</span>`;
+  } else if (overNote) {
+    previewEl.innerHTML =
+      `<strong>${overNote.totalStr}</strong> portfolios · <span class="optimizer-over">${overNote.overStr}</span>`;
   } else {
     previewEl.textContent = '';
   }
@@ -2135,12 +2172,9 @@ function renderOptimizerStep2Results(res, meta) {
   }
 
   // Frontier table (winner always shown, even if the cap pushes it off the
-  // success/CAGR frontier), with a Max Drawdown column.
-  let frontierRows = frontier;
-  if (best && !frontier.includes(best)) {
-    frontierRows = [...frontier, best].sort((a, b) =>
-      a.success_rate_pct - b.success_rate_pct || a.cagr_real_median - b.cagr_real_median);
-  }
+  // success/CAGR frontier), with a Max Drawdown column. Padded up to the top 10
+  // so a locked split that yields a 1–2-point frontier still gives a real list.
+  const frontierRows = optimizerTableRows(res, OPTIMIZER_TABLE_MIN_ROWS);
   let table = '';
   if (frontierRows.length) {
     const rows = frontierRows.map((p) => {
@@ -2209,7 +2243,7 @@ function renderOptimizerStep2Chart(res, meta) {
     (ddMag(q) < ddMag(p) || q.cagr_real_median > p.cagr_real_median)))
     .sort((a, b) => ddMag(a) - ddMag(b));
 
-  const pt = (p) => ({ x: ddMag(p), y: p.cagr_real_median });
+  const pt = (p) => ({ x: ddMag(p), y: p.cagr_real_median, alloc: optimizerAllocLines(p.allocation) });
   const qual = valid.filter((p) => p.qualifies && p !== best).map(pt);
   const fail = valid.filter((p) => !p.qualifies && p !== best).map(pt);
 
@@ -2243,7 +2277,9 @@ function renderOptimizerStep2Chart(res, meta) {
           label: (item) => {
             const lbl = item.dataset.label;
             if (lbl.startsWith('Drawdown cap')) return lbl;
-            return `${item.parsed.y.toFixed(2)}% CAGR @ ${item.parsed.x.toFixed(1)}% drawdown`;
+            const head = `${item.parsed.y.toFixed(2)}% CAGR @ ${item.parsed.x.toFixed(1)}% drawdown`;
+            const alloc = (item.raw && item.raw.alloc) ? item.raw.alloc : [];
+            return [head, ...alloc];
           },
         } },
       },
@@ -2586,11 +2622,16 @@ function updateOptimizerPreview() {
   const { plan, hasSpending } = getSimulatorPlanForOptimizer();
   const step = OPTIMIZER_STATE.step;
 
-  let count = 0, exceeded = false, feasible = true;
+  let count = 0, exceeded = false, feasible = true, overInfo = null;
   if (keys.length >= 2) {
     const { m, lo, hi } = optimizerUnitBounds(keys, step);
     const res = countGridCompositions(lo, hi, m, optimizerCandidateCap());
     count = res.count; exceeded = res.exceeded; feasible = res.feasible;
+    if (exceeded) {
+      // Recount to a higher ceiling so we can report exactly how far over the cap.
+      const full = countGridCompositions(lo, hi, m, OPTIMIZER_COUNT_CEILING);
+      overInfo = optimizerOverLimitNote(full.count, full.exceeded);
+    }
   }
   OPTIMIZER_STATE.lastCount = count;
 
@@ -2602,7 +2643,9 @@ function updateOptimizerPreview() {
   } else if (!feasible) {
     previewEl.textContent = 'No portfolio fits these limits.';
   } else if (exceeded) {
-    previewEl.innerHTML = `<strong>${optimizerCandidateCap().toLocaleString('en-US')}+</strong> portfolios — too many to run.`;
+    previewEl.innerHTML = overInfo
+      ? `<strong>${overInfo.totalStr}</strong> portfolios · <span class="optimizer-over">${overInfo.overStr}</span>`
+      : `<strong>${optimizerCandidateCap().toLocaleString('en-US')}+</strong> portfolios — too many to run.`;
   } else {
     const estMs = count * OPTIMIZER_STATE.simsPerCandidate * plan.period_years *
                   OPTIMIZER_MS_PER_SIM_YEAR / OPTIMIZER_STATE.poolSize;
@@ -2917,6 +2960,26 @@ function computeOptimizerResults(points, floorPct, ddCap = null) {
   return { best, closest, frontier, valid: rankedValid, validCount: valid.length, invalidCount };
 }
 
+// Build the row set for a results table: the efficient frontier, guaranteed to
+// include the winner, padded up to `minRows` with the next-highest-real-CAGR
+// valid portfolios (res.valid is ranked CAGR desc). If the frontier already has
+// more rows than minRows, all of them are kept — this only ever adds rows. The
+// returned list is ordered success ↑ then real-CAGR ↑ for display.
+function optimizerTableRows(res, minRows) {
+  const { frontier, best } = res;
+  let rows = (best && !frontier.includes(best)) ? [...frontier, best] : [...frontier];
+  if (rows.length < minRows && res.valid) {
+    const shown = new Set(rows);
+    for (const p of res.valid) {           // res.valid is ranked by real CAGR desc
+      if (rows.length >= minRows) break;
+      if (!shown.has(p)) { rows.push(p); shown.add(p); }
+    }
+  }
+  rows.sort((a, b) =>
+    a.success_rate_pct - b.success_rate_pct || a.cagr_real_median - b.cagr_real_median);
+  return rows;
+}
+
 /* ---- Run-state UI helpers ---- */
 function setOptimizerBusy(busy) {
   const btn  = document.getElementById('optimizer-run');
@@ -2947,6 +3010,16 @@ function optimizerAllocationSummary(alloc) {
     .sort((a, b) => b.pct - a.pct)
     .map((a) => `${a.pct}% ${escapeHtml((byKey.get(a.key) || {}).name || a.key)}`)
     .join(' · ');
+}
+
+// Plain-text allocation, one "45% S&P 500" per array element (NOT HTML-escaped —
+// this feeds Chart.js canvas tooltips, where "&amp;" would render literally).
+// Returned as an array so each holding is its own tooltip line.
+function optimizerAllocLines(alloc) {
+  const byKey = new Map(STATE.assets.map((a) => [a.key, a]));
+  return [...alloc]
+    .sort((a, b) => b.pct - a.pct)
+    .map((a) => `${a.pct}% ${(byKey.get(a.key) || {}).name || a.key}`);
 }
 
 function optimizerFmtPct(v, d = 1) { return v == null ? '—' : `${v.toFixed(d)}%`; }
@@ -3016,23 +3089,10 @@ function renderOptimizerResults(res, meta) {
   }
 
   // Frontier table. The Pareto set is success↑ vs CAGR↑; when the drawdown cap
-  // binds, the winner can be dominated on those two axes, so make sure it's still
-  // shown (tagged "best"). Always show ≥5 rows — pad with the next-highest
-  // real-CAGR portfolios (dimmed if they miss the floor/cap).
-  let frontierRows = frontier;
-  if (best && !frontier.includes(best)) {
-    frontierRows = [...frontier, best].sort((a, b) =>
-      a.success_rate_pct - b.success_rate_pct || a.cagr_real_median - b.cagr_real_median);
-  }
-  if (frontierRows.length < 5 && res.valid) {
-    const shown = new Set(frontierRows);
-    for (const p of res.valid) {           // res.valid is ranked by real CAGR desc
-      if (frontierRows.length >= 5) break;
-      if (!shown.has(p)) { frontierRows = [...frontierRows, p]; shown.add(p); }
-    }
-    frontierRows.sort((a, b) =>
-      a.success_rate_pct - b.success_rate_pct || a.cagr_real_median - b.cagr_real_median);
-  }
+  // binds, the winner can be dominated on those two axes, so it's force-included
+  // (tagged "best"). Always show up to the top 10 — pad past the frontier with
+  // the next-highest real-CAGR portfolios (dimmed if they miss the floor/cap).
+  const frontierRows = optimizerTableRows(res, OPTIMIZER_TABLE_MIN_ROWS);
   let table = '';
   if (frontierRows.length) {
     const rows = frontierRows.map((p) => {
@@ -3106,7 +3166,7 @@ function renderOptimizerFreeChart(res, meta) {
     (q.success_rate_pct > p.success_rate_pct || q.ending_wealth_real > p.ending_wealth_real)))
     .sort((a, b) => a.success_rate_pct - b.success_rate_pct || a.ending_wealth_real - b.ending_wealth_real);
 
-  const pt = (p) => ({ x: p.success_rate_pct, y: p.ending_wealth_real });
+  const pt = (p) => ({ x: p.success_rate_pct, y: p.ending_wealth_real, alloc: optimizerAllocLines(p.allocation) });
   const qual = valid.filter((p) => p.qualifies && p !== best).map(pt);
   const fail = valid.filter((p) => !p.qualifies && p !== best).map(pt);
 
@@ -3151,7 +3211,9 @@ function renderOptimizerFreeChart(res, meta) {
           label: (item) => {
             const lbl = item.dataset.label;
             if (lbl.startsWith('Success floor')) return lbl;
-            return `${formatCurrency(Math.round(item.parsed.y))} ending @ ${item.parsed.x.toFixed(1)}% success`;
+            const head = `${formatCurrency(Math.round(item.parsed.y))} ending @ ${item.parsed.x.toFixed(1)}% success`;
+            const alloc = (item.raw && item.raw.alloc) ? item.raw.alloc : [];
+            return [head, ...alloc];
           },
         } },
       },
