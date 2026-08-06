@@ -249,6 +249,7 @@ function runOneSim(ctx) {
     depletedFlags, depletionYears,
     sampledYearCounts, year1YearCounts,
     drawnInflation, drawnStockReturn, correlationAssetKey, year1AccRef,
+    crnDraws,
   } = ctx;
 
   const balanceBase = simIndex * (Y + 1);
@@ -291,10 +292,16 @@ function runOneSim(ctx) {
     return e;
   };
 
-  // PHASE 1: pre-draw Y row references (random with replacement).
+  // PHASE 1: pre-draw Y row references (random with replacement). When a Common
+  // Random Numbers draw table is supplied (optimizer path), use it so every
+  // candidate sees the SAME bootstrap sequences — differences between candidates
+  // then reflect allocation, not sampling luck. Falls back to Math.random for the
+  // full Simulator (single portfolio, where independent sims are correct).
   const rowSeq = new Array(Y);
+  const crnBase = simIndex * Y;
   for (let t = 0; t < Y; t++) {
-    rowSeq[t] = eligibleRows[(Math.random() * eligibleRows.length) | 0];
+    const u = crnDraws ? crnDraws[crnBase + t] : Math.random();
+    rowSeq[t] = eligibleRows[(u * eligibleRows.length) | 0];
   }
 
   // PHASE 2: sequence-of-returns reorder.
@@ -1347,6 +1354,18 @@ function pearson(x, y) {
                  { type:'optimize_results', points }   // one point per candidate
                  { type:'optimize_error', message }
    ============================================================ */
+// Seeded PRNG (mulberry32) — deterministic across workers, so every pooled
+// worker rebuilds the identical Common-Random-Numbers draw table from one seed.
+function mulberry32(seed) {
+  let a = seed >>> 0;
+  return function () {
+    a = (a + 0x6D2B79F5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
 function runOptimize(msg) {
   try {
     const plan = msg.plan;
@@ -1355,6 +1374,19 @@ function runOptimize(msg) {
     const N = msg.simsPerCandidate;
     const Y = plan.period_years;
     const strategy = plan.distribution_strategy || 'none';
+
+    // Common Random Numbers: build one shared N×Y table of uniform draws from the
+    // run's seed. Every candidate maps these same draws onto its eligible-year
+    // pool, so the success/return curve across splits reflects allocation rather
+    // than sampling noise (the counterintuitive wiggle otherwise). Exact CRN when
+    // pools are identical (Step 1's two proxies always are); graceful near-CRN if
+    // a candidate's pool differs. No seed (or a full-sim run) → independent draws.
+    let crnDraws = null;
+    if (msg.crnSeed != null) {
+      const rand = mulberry32(msg.crnSeed);
+      crnDraws = new Float64Array(N * Y);
+      for (let i = 0; i < crnDraws.length; i++) crnDraws[i] = rand();
+    }
 
     // Resolve strategy params once (same defaults as runSimulation).
     const sp = plan.strategy_params || {};
@@ -1376,7 +1408,7 @@ function runOptimize(msg) {
     for (let c = 0; c < candidates.length; c++) {
       let stats;
       try {
-        stats = runOptimizeCandidate(plan, candidates[c], N, Y, data, buffers, strategy, strat);
+        stats = runOptimizeCandidate(plan, candidates[c], N, Y, data, buffers, strategy, strat, crnDraws);
       } catch (err) {
         stats = { invalid: true, reason: (err && err.message) ? err.message : String(err) };
       }
@@ -1417,7 +1449,7 @@ function allocateOptimizeBuffers(N, Y) {
   };
 }
 
-function runOptimizeCandidate(plan, allocation, N, Y, data, b, strategy, strat) {
+function runOptimizeCandidate(plan, allocation, N, Y, data, b, strategy, strat, crnDraws) {
   const inputs = Object.assign({}, plan, { allocations: allocation, n_simulations: N });
   const eligibleRows = buildEligibleRows(inputs, data);
   if (eligibleRows.length === 0) return { invalid: true, reason: 'no_data_in_period' };
@@ -1469,6 +1501,7 @@ function runOptimizeCandidate(plan, allocation, N, Y, data, b, strategy, strat) 
       drawnStockReturn: b.emptyArr,
       correlationAssetKey: null,
       year1AccRef: noopYear1,
+      crnDraws,
     });
   }
 

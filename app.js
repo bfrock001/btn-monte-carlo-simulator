@@ -3015,6 +3015,11 @@ function runOptimizeBatch(candidates, plan, N, { onProgress } = {}) {
     const total = candidates.length;
     if (total === 0) { resolve([]); return; }
 
+    // One Common-Random-Numbers seed per run, shared by every pooled worker, so
+    // all candidates (across all workers) draw from the SAME bootstrap sequences.
+    // Fresh each run, so re-running still reflects Monte-Carlo variability.
+    const crnSeed = (Math.random() * 0x100000000) >>> 0;
+
     // Split into contiguous slices, one per pooled worker.
     const poolSize = Math.max(1, Math.min(OPTIMIZER_STATE.poolSize, total));
     const sliceSize = Math.ceil(total / poolSize);
@@ -3063,7 +3068,7 @@ function runOptimizeBatch(candidates, plan, N, { onProgress } = {}) {
         cleanup();
         reject(new Error((err && err.message) || 'Optimization worker error.'));
       };
-      w.postMessage({ type: 'optimize', plan, candidates: slice, simsPerCandidate: N, data: STATE.data });
+      w.postMessage({ type: 'optimize', plan, candidates: slice, simsPerCandidate: N, data: STATE.data, crnSeed });
     });
   });
 }
