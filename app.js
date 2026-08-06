@@ -1747,15 +1747,28 @@ function rederiveOptimizerStep1() {
    Two-step mode — Step 2: refine within the locked split (c18j)
    ============================================================ */
 
-// Step-2 sub-class weight grid, user-selectable (5% or 10%). 5% divides any
-// 5%-multiple split; 10% only divides mult-of-10 splits, so this falls back to 5%
-// when the locked split isn't a multiple of 10 — defense-in-depth beyond the
-// disabled 10% selector option (so an out-of-sync state can never mis-sum a bucket).
+// Step-2 sub-class weight grid, user-selectable (5% or 10%). Returns the chosen
+// grid as-is; enumerateStep2Bucket() keeps each bucket's sum EXACTLY on the locked
+// split even when a 10% grid can't tile an odd-5 split (e.g. 75/25) — it lets one
+// fund per bucket carry the leftover 5%.
 function optimizerStep2Step() {
-  const E = OPTIMIZER_STATE.twostep.lockedEquityPct;
-  const g = OPTIMIZER_STATE.twostep.step2Grid || 5;
-  if (g === 10 && (E == null || E % 10 !== 0)) return 5;
-  return g;
+  return OPTIMIZER_STATE.twostep.step2Grid || 5;
+}
+
+// Enumerate one bucket's compositions at the chosen grid, always summing EXACTLY
+// to targetPct. A 10% grid is expressed as the 5% grid filtered to at most one
+// weight ending in 5: on a mult-of-10 bucket that leaves only pure 10% weights
+// (zero odd weights); on an odd-5 bucket it keeps the sum exact by letting exactly
+// one fund carry the extra 5% (all others are multiples of 10). Respects per-fund
+// caps because it filters the existing cap-aware enumeration.
+function enumerateStep2Bucket(keys, targetPct, grid, cap) {
+  if (targetPct === 0) return [[]];
+  if (grid === 5 || targetPct % grid === 0) {
+    return enumerateGridCompositions(keys, grid, cap, targetPct);
+  }
+  // grid === 10 on an odd-5 bucket: 5% grid, ≤1 weight ending in 5.
+  const fine = enumerateGridCompositions(keys, 5, cap, targetPct);
+  return fine.filter((alloc) => alloc.reduce((n, a) => n + (a.pct % 10 === 5 ? 1 : 0), 0) <= 1);
 }
 
 // Partition the optimizer's covered, selected assets into stock / bond buckets.
@@ -1824,10 +1837,10 @@ function renderOptimizerStep2Controls() {
 
   banner.innerHTML = `Refining within <strong>${E}% stocks / ${F}% bonds</strong> — locked from Step 1.`;
 
-  // Weight-grid selector: 10% only divides mult-of-10 splits, so it's disabled for
-  // an odd-5 split (e.g. 65/35) with a note, and the grid stays at 5%.
-  const tenOk = E != null && E % 10 === 0;
-  if (!tenOk && OPTIMIZER_STATE.twostep.step2Grid === 10) OPTIMIZER_STATE.twostep.step2Grid = 5;
+  // Weight-grid selector (5% / 10%) — 10% is always available. For a mult-of-10
+  // split it tiles cleanly; for an odd-5 split (e.g. 75/25) the enumeration keeps
+  // the sum exact by letting one fund per bucket carry the leftover 5% (noted below).
+  const oddSplit = E != null && E % 10 !== 0;
   const curGrid = optimizerStep2Step();
   const gridRow = document.getElementById('opt-step2-gridrow');
   if (gridRow) {
@@ -1835,9 +1848,9 @@ function renderOptimizerStep2Controls() {
       `<label class="opt-step2-gridrow__lab" for="opt-step2-grid">Weight grid</label>` +
       `<select id="opt-step2-grid" class="select opt-step2-grid__select">` +
         `<option value="5"${curGrid === 5 ? ' selected' : ''}>5% steps · finer</option>` +
-        `<option value="10"${curGrid === 10 ? ' selected' : ''}${tenOk ? '' : ' disabled'}>10% steps · fewer portfolios</option>` +
+        `<option value="10"${curGrid === 10 ? ' selected' : ''}>10% steps · fewer portfolios</option>` +
       `</select>` +
-      (tenOk ? '' : `<span class="field-note small opt-step2-gridrow__note">10% grid needs a split like 70/30 or 60/40 — yours is ${E}/${F}, so it stays at 5%.</span>`);
+      (oddSplit ? `<span class="field-note small opt-step2-gridrow__note">Your ${E}/${F} split isn’t a multiple of 10 — a 10% grid keeps it exact by letting one fund per bucket carry the leftover 5%.</span>` : '');
     const gsel = document.getElementById('opt-step2-grid');
     if (gsel) gsel.addEventListener('change', () => {
       OPTIMIZER_STATE.twostep.step2Grid = parseInt(gsel.value, 10) || 5;
@@ -1912,8 +1925,16 @@ function bindOptimizerStep2CapInputs() {
 function optimizerStep2BucketCount(keys, targetPct, cap) {
   if (targetPct === 0) return { count: 1, feasible: true, exceeded: false };
   if (keys.length === 0) return { count: 0, feasible: false, exceeded: false };
-  const { m, lo, hi } = optimizerUnitBounds(keys, optimizerStep2Step(), targetPct);
-  return countGridCompositions(lo, hi, m, cap);
+  const grid = optimizerStep2Step();
+  // Divisible grid (any 5% grid, or 10% on a mult-of-10 bucket): fast combinatorial count.
+  if (grid === 5 || targetPct % grid === 0) {
+    const { m, lo, hi } = optimizerUnitBounds(keys, grid, targetPct);
+    return countGridCompositions(lo, hi, m, cap);
+  }
+  // 10% grid on an odd-5 bucket has no uniform tiling — enumerate the one-remainder
+  // set and count it (Step-2 buckets are small).
+  const arr = enumerateStep2Bucket(keys, targetPct, grid, cap);
+  return { count: arr.length, feasible: arr.length > 0, exceeded: arr.length > cap };
 }
 
 // The full candidate set = equity compositions (sum E) × FI compositions (sum F).
@@ -1922,8 +1943,8 @@ function optimizerStep2Candidates() {
   if (E == null) return { candidates: [], eqKeys: [], fiKeys: [] };
   const F = 100 - E;
   const { equityKeys, fiKeys } = optimizerStep2Buckets();
-  const eqComps = E === 0 ? [[]] : enumerateGridCompositions(equityKeys, optimizerStep2Step(), optimizerCandidateCap(), E);
-  const fiComps = F === 0 ? [[]] : enumerateGridCompositions(fiKeys, optimizerStep2Step(), optimizerCandidateCap(), F);
+  const eqComps = E === 0 ? [[]] : enumerateStep2Bucket(equityKeys, E, optimizerStep2Step(), optimizerCandidateCap());
+  const fiComps = F === 0 ? [[]] : enumerateStep2Bucket(fiKeys, F, optimizerStep2Step(), optimizerCandidateCap());
   const candidates = [];
   for (const ec of eqComps) {
     for (const fc of fiComps) {
