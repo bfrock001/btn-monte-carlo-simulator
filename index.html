@@ -898,6 +898,12 @@
             Leadership rotates. Each column is one year of the selected range; assets are stacked best (top) to worst (bottom) by that year&rsquo;s annual total return. Each asset keeps the <strong>same color across every column</strong>, so you can trace how it moves through the ranks. Years before an asset&rsquo;s data starts leave a shorter column &mdash; no zero placeholder. The rightmost column ranks the assets by <strong>CAGR</strong> over the whole selected range.
           </p>
 
+          <label class="periodic-portfolio-toggle" for="periodic-include-portfolio">
+            <input type="checkbox" id="periodic-include-portfolio" checked />
+            <span>Include my portfolio <span class="periodic-portfolio-toggle__hint">&mdash; the mix loaded in the Simulator, ranked alongside the asset classes each year</span></span>
+          </label>
+          <p id="periodic-portfolio-note" class="periodic-portfolio-note" hidden></p>
+
           <div id="periodic-legend" class="periodic-legend" aria-label="Asset color legend"></div>
 
           <div id="periodic-empty" class="correlation-empty" hidden></div>

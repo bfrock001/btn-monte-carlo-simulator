@@ -14,6 +14,7 @@ const STATE = {
   step3: {
     selectedAssets: [],  // populated in initStep3AssetSelection
     rangeValid: true,    // false when custom range < 10 years
+    includePortfolio: true, // periodic table adds the Simulator's loaded mix as a ranked row
   },
   optimizer: {
     selectedAssets: [],  // independent of step3; populated in initOptimizerAssetSelection
@@ -203,9 +204,20 @@ const STEP3_SOFT_CAP = 14;    // Spec §3.2 soft cap for readability
 function initStep3() {
   bindTabs();
   bindStep3PeriodToggle();
+  bindPeriodicPortfolioToggle();
   initStep3AssetSelection();
   initOptimizer();
   refreshStep3Tools();
+}
+
+function bindPeriodicPortfolioToggle() {
+  const cb = document.getElementById('periodic-include-portfolio');
+  if (!cb) return;
+  cb.checked = STATE.step3.includePortfolio;
+  cb.addEventListener('change', () => {
+    STATE.step3.includePortfolio = cb.checked;
+    renderPeriodicTable();
+  });
 }
 
 function bindTabs() {
@@ -231,6 +243,9 @@ function bindTabs() {
       // strategy…), which may have changed while that tab was open — refresh it
       // each time the Optimizer tab is shown.
       if (target === 'optimizer') renderOptimizerControls();
+      // The periodic table's "your portfolio" row reads the Simulator's loaded
+      // allocation, which may have changed on the other tab — re-sync on show.
+      if (target === 'data') refreshStep3Tools();
     });
   });
 }
@@ -559,6 +574,95 @@ function step3AssetStats(key, start, end) {
   return { cagr, std, n };
 }
 
+// Sentinel "asset key" for the Simulator's loaded portfolio when it's added as a
+// row in the periodic table. Not a real asset — handled specially everywhere.
+const PORTFOLIO_KEY = '__portfolio__';
+
+// The Simulator's currently-loaded allocation as normalized weights, or null if
+// nothing usable is entered. Weights are normalized to the entered total so a
+// partially-filled allocation still blends sensibly.
+function getSimulatorPortfolio() {
+  const validKeys = new Set(STATE.assets.map((a) => a.key));
+  const raw = (INPUT_STATE.allocations || []).filter((a) => a.key && a.pct > 0 && validKeys.has(a.key));
+  if (!raw.length) return null;
+  const totalPct = raw.reduce((s, a) => s + a.pct, 0);
+  if (totalPct <= 0) return null;
+  const weights = raw.map((a) => ({ key: a.key, pct: a.pct, w: a.pct / totalPct }));
+  return { weights, totalPct };
+}
+
+// Per-year blended return for the portfolio over [start, end], rebalanced to
+// target weights each year. A year is INCLUDED only if EVERY holding has data
+// that year; otherwise it's skipped and the missing holding(s) are recorded so
+// the UI can explain what constrained the row.
+function computePortfolioYearReturns(pf, start, end, rowsByYear) {
+  const byYear = new Map();
+  const skipped = [];
+  const missing = new Map(); // assetKey -> count of skipped years it caused
+  for (let y = start; y <= end; y++) {
+    const row = rowsByYear.get(y);
+    if (!row) continue; // year absent from the dataset entirely — not a holding gap
+    const gaps = pf.weights.filter((h) => row[h.key] == null);
+    if (gaps.length) {
+      skipped.push(y);
+      gaps.forEach((h) => missing.set(h.key, (missing.get(h.key) || 0) + 1));
+      continue;
+    }
+    let ret = 0;
+    for (const h of pf.weights) ret += h.w * row[h.key];
+    byYear.set(y, ret);
+  }
+  return { byYear, skipped, missing };
+}
+
+// CAGR / sample-σ of the portfolio over the years it actually covers — same
+// formulas as step3AssetStats so the summary column is apples-to-apples.
+function computePortfolioStats(byYear) {
+  const returns = [...byYear.values()];
+  const n = returns.length;
+  if (n === 0) return { cagr: null, std: null, n: 0 };
+  let mean = 0; for (const v of returns) mean += v; mean /= n;
+  let variance = 0; for (const v of returns) { const d = v - mean; variance += d * d; }
+  variance /= Math.max(1, n - 1);
+  const std = Math.sqrt(variance);
+  let logSum = 0; for (const v of returns) logSum += Math.log(1 + v / 100);
+  const cagr = (Math.exp(logSum / n) - 1) * 100;
+  return { cagr, std, n };
+}
+
+// Compress a sorted year list into compact ranges: [1972,1973,1974,1988] → "1972–1974, 1988".
+function compressYears(years) {
+  if (!years.length) return '';
+  const sorted = [...years].sort((a, b) => a - b);
+  const parts = [];
+  let runStart = sorted[0], prev = sorted[0];
+  for (let i = 1; i <= sorted.length; i++) {
+    const y = sorted[i];
+    if (y === prev + 1) { prev = y; continue; }
+    parts.push(runStart === prev ? `${runStart}` : `${runStart}–${prev}`);
+    runStart = prev = y;
+  }
+  return parts.join(', ');
+}
+
+// Short display label for the Simulator portfolio, e.g. "Portfolio 60/40" when
+// it's a clean equity/fixed-income split, else just "Portfolio".
+function portfolioShortLabel(pf) {
+  const byKey = new Map(STATE.assets.map((a) => [a.key, a]));
+  let eq = 0, fi = 0, other = 0;
+  for (const h of pf.weights) {
+    const g = (byKey.get(h.key) || {}).group;
+    if (g === 'US Equity' || g === 'International Equity') eq += h.pct;
+    else if (g === 'Fixed Income') fi += h.pct;
+    else other += h.pct;
+  }
+  const tot = eq + fi + other;
+  if (tot > 0 && other === 0) {
+    return `Portfolio ${Math.round((eq / tot) * 100)}/${Math.round((fi / tot) * 100)}`;
+  }
+  return 'Portfolio';
+}
+
 function renderCorrelationMatrix() {
   const scroll = document.getElementById('correlation-scroll');
   const empty  = document.getElementById('correlation-empty');
@@ -829,6 +933,10 @@ function renderPeriodicTable() {
   bindPeriodicHighlight(section);
   periodicHlKey = null;
   if (section) section.classList.remove('pt-focus');
+  // Portfolio constraint note starts hidden every render; the main path re-shows
+  // it only when the portfolio row actually had to skip years.
+  const pNote0 = document.getElementById('periodic-portfolio-note');
+  if (pNote0) pNote0.hidden = true;
 
   const selected = STATE.step3.selectedAssets.slice();
   if (selected.length < 2) {
@@ -876,13 +984,73 @@ function renderPeriodicTable() {
   // Summary column: assets sorted by CAGR desc across the whole range.
   const stats = new Map();
   keys.forEach((k) => stats.set(k, step3AssetStats(k, start, end)));
-  const summary = keys.slice().sort((a, b) => {
-    const ca = stats.get(a).cagr, cb = stats.get(b).cagr;
+  const summary = keys.slice();
+
+  // ---- Optional: the Simulator's loaded portfolio as an extra ranked row ----
+  // Blended (annually-rebalanced) return per year; skips years where any holding
+  // has no data and calls out which holding(s) constrained the row.
+  const pf = STATE.step3.includePortfolio ? getSimulatorPortfolio() : null;
+  let portfolioLabel = 'Portfolio';       // full label (legend + tooltips)
+  let portfolioCellLabel = 'Portfolio';   // compact label for narrow table cells
+  const noteEl = document.getElementById('periodic-portfolio-note');
+  if (pf) {
+    portfolioLabel = portfolioShortLabel(pf);
+    portfolioCellLabel = portfolioLabel.startsWith('Portfolio ')
+      ? portfolioLabel.slice('Portfolio '.length)  // "Portfolio 60/40" -> "60/40"
+      : portfolioLabel;
+    const pInfo = computePortfolioYearReturns(pf, start, end, rowsByYear);
+    // Insert into each covered year's ranking + grow maxRank as needed.
+    years.forEach((y) => {
+      if (!pInfo.byYear.has(y)) return;
+      const ranked = yearRankings.get(y);
+      ranked.push({ key: PORTFOLIO_KEY, ret: pInfo.byYear.get(y), isPortfolio: true });
+      ranked.sort((a, b) => b.ret - a.ret);
+      if (ranked.length > maxRank) maxRank = ranked.length;
+    });
+    stats.set(PORTFOLIO_KEY, computePortfolioStats(pInfo.byYear));
+    if (pInfo.byYear.size) summary.push(PORTFOLIO_KEY);
+    // Constraint callout.
+    if (noteEl) {
+      if (pInfo.skipped.length) {
+        const names = [...pInfo.missing.keys()].map((k) => (byKey.get(k) || {}).name || k);
+        const nameStr = names.length === 1 ? names[0]
+          : names.slice(0, -1).join(', ') + ' and ' + names[names.length - 1];
+        noteEl.innerHTML =
+          `Your portfolio row skips ${pInfo.skipped.length} year${pInfo.skipped.length === 1 ? '' : 's'} ` +
+          `(${escapeHtml(compressYears(pInfo.skipped))}) — ${escapeHtml(nameStr)} ` +
+          `${names.length === 1 ? 'has' : 'have'} no data then, so no blended return can be shown.`;
+        noteEl.hidden = false;
+      } else {
+        noteEl.hidden = true;
+        noteEl.textContent = '';
+      }
+    }
+  } else if (noteEl) {
+    noteEl.hidden = true;
+    noteEl.textContent = '';
+  }
+
+  // Sort the summary column (assets + optional portfolio) by CAGR desc.
+  summary.sort((a, b) => {
+    const ca = stats.get(a)?.cagr, cb = stats.get(b)?.cagr;
     return (cb == null ? -Infinity : cb) - (ca == null ? -Infinity : ca);
   });
 
   // ---- Legend (color chip + asset name, grouped by family) ----
   legend.innerHTML = '';
+  if (pf) {
+    const item = document.createElement('span');
+    item.className = 'periodic-legend__item periodic-legend__item--portfolio';
+    item.dataset.assetKey = PORTFOLIO_KEY;
+    const chip = document.createElement('span');
+    chip.className = 'periodic-legend__chip';
+    const label = document.createElement('span');
+    label.className = 'periodic-legend__label';
+    label.textContent = portfolioLabel + ' (your mix)';
+    item.appendChild(chip);
+    item.appendChild(label);
+    legend.appendChild(item);
+  }
   keys.forEach((k) => {
     const asset = byKey.get(k);
     const item = document.createElement('span');
@@ -923,8 +1091,12 @@ function renderPeriodicTable() {
   thead.appendChild(hr);
 
   // ---- Body rows: one per rank slot ----
+  // Extend to the longer of the tallest year column and the summary list, so a
+  // portfolio (or any asset) that never shares a fully-populated year still gets
+  // its summary row rendered.
   tbody.innerHTML = '';
-  for (let rank = 0; rank < maxRank; rank++) {
+  const rowCount = Math.max(maxRank, summary.length);
+  for (let rank = 0; rank < rowCount; rank++) {
     const tr = document.createElement('tr');
 
     const rh = document.createElement('th');
@@ -942,16 +1114,24 @@ function renderPeriodicTable() {
         tr.appendChild(td);
         return;
       }
-      const asset = byKey.get(entry.key);
       const td = document.createElement('td');
       td.className = 'pt-cell';
-      td.style.background = assetColor(entry.key);
-      if (assetColorIsDark(entry.key)) td.classList.add('pt-cell--dark');
-      td.dataset.group = groupSlug(asset.group);
       td.dataset.assetKey = entry.key;
-      td.title = `${asset.name} · ${y}: ${fmtSignedPct(entry.ret)}\n` +
-                 `Rank ${rank + 1} of ${ranked.length}`;
-      const label = STEP3_SHORT_LABELS[entry.key] || asset.ticker || asset.name;
+      let label;
+      if (entry.isPortfolio) {
+        td.classList.add('pt-cell--portfolio', 'pt-cell--dark');
+        td.title = `${portfolioLabel} (your mix) · ${y}: ${fmtSignedPct(entry.ret)}\n` +
+                   `Rank ${rank + 1} of ${ranked.length}`;
+        label = portfolioCellLabel;
+      } else {
+        const asset = byKey.get(entry.key);
+        td.style.background = assetColor(entry.key);
+        if (assetColorIsDark(entry.key)) td.classList.add('pt-cell--dark');
+        td.dataset.group = groupSlug(asset.group);
+        td.title = `${asset.name} · ${y}: ${fmtSignedPct(entry.ret)}\n` +
+                   `Rank ${rank + 1} of ${ranked.length}`;
+        label = STEP3_SHORT_LABELS[entry.key] || asset.ticker || asset.name;
+      }
       td.innerHTML =
         `<span class="pt-cell__label">${escapeHtml(label)}</span>` +
         `<span class="pt-cell__ret">${fmtSignedPct(entry.ret)}</span>`;
@@ -965,17 +1145,28 @@ function renderPeriodicTable() {
     if (!sumKey) {
       td.classList.add('pt-summary--empty');
     } else {
-      const asset = byKey.get(sumKey);
       const s = stats.get(sumKey);
-      td.style.background = assetColor(sumKey);
-      if (assetColorIsDark(sumKey)) td.classList.add('pt-summary--dark');
-      td.dataset.group = groupSlug(asset.group);
+      const isPf = sumKey === PORTFOLIO_KEY;
       td.dataset.assetKey = sumKey;
-      td.title = `${asset.name}\n` +
-                 `CAGR ${s.cagr == null ? '—' : s.cagr.toFixed(2) + '%'} · ` +
-                 `σ ${s.std == null ? '—' : s.std.toFixed(2) + '%'} · ` +
-                 `${s.n} yrs`;
-      const label = STEP3_SHORT_LABELS[sumKey] || asset.ticker || asset.name;
+      let label;
+      if (isPf) {
+        td.classList.add('pt-summary--portfolio', 'pt-summary--dark');
+        td.title = `${portfolioLabel} (your mix)\n` +
+                   `CAGR ${s.cagr == null ? '—' : s.cagr.toFixed(2) + '%'} · ` +
+                   `σ ${s.std == null ? '—' : s.std.toFixed(2) + '%'} · ` +
+                   `${s.n} yrs`;
+        label = portfolioCellLabel;
+      } else {
+        const asset = byKey.get(sumKey);
+        td.style.background = assetColor(sumKey);
+        if (assetColorIsDark(sumKey)) td.classList.add('pt-summary--dark');
+        td.dataset.group = groupSlug(asset.group);
+        td.title = `${asset.name}\n` +
+                   `CAGR ${s.cagr == null ? '—' : s.cagr.toFixed(2) + '%'} · ` +
+                   `σ ${s.std == null ? '—' : s.std.toFixed(2) + '%'} · ` +
+                   `${s.n} yrs`;
+        label = STEP3_SHORT_LABELS[sumKey] || asset.ticker || asset.name;
+      }
       td.innerHTML =
         `<span class="pt-summary__label">${escapeHtml(label)}</span>` +
         `<span class="pt-summary__cagr">${s.cagr == null ? '—' : s.cagr.toFixed(1) + '%'}</span>` +
@@ -991,7 +1182,8 @@ function renderPeriodicTable() {
       ? `Custom (${start}–${end})`
       : PERIOD_LABELS[STATE.period].name;
     sub.textContent =
-      `${keys.length} assets · ${periodLabel} · ${years.length} year column${years.length === 1 ? '' : 's'}.`;
+      `${keys.length} assets${pf ? ' + your portfolio' : ''} · ${periodLabel} · ` +
+      `${years.length} year column${years.length === 1 ? '' : 's'}.`;
   }
 
   // Wide ranges get parked at the latest year — recent decades are what
