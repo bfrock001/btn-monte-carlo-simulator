@@ -4884,7 +4884,7 @@ function bindTermsModal() {
    simulation has completed). UI gates the buttons until then.
    ============================================================ */
 
-const SCHEMA_VERSION = 'ttn-mcsim-csv-v1';
+const SCHEMA_VERSION = 'btn-mcsim-csv-v1';
 
 // Internal strategy id -> human-readable label for the CSV strategy column
 // (we keep the lowercase id in CSV per the producer contract, but use these
@@ -5180,8 +5180,8 @@ function downloadPDF() {
       doc.setTextColor(...INK);
       doc.setFont('times', 'normal');
       doc.setFontSize(18);
-      doc.text('Through the ', MARGIN_X + 18, y + 13);
-      const beforeNoiseW = doc.getTextWidth('Through the ');
+      doc.text('Beyond the ', MARGIN_X + 18, y + 13);
+      const beforeNoiseW = doc.getTextWidth('Beyond the ');
       doc.setFont('times', 'italic');
       doc.text('Noise', MARGIN_X + 18 + beforeNoiseW, y + 13);
       doc.setFont('helvetica', 'normal');
