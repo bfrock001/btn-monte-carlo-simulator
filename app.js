@@ -783,6 +783,37 @@ function fmtSignedPct(v) {
   return s + Math.abs(v).toFixed(1) + '%';
 }
 
+// Periodic-table asset spotlight: hovering any cell / summary / legend chip of
+// an asset brightens that asset's whole trail across the years and dims the rest,
+// so its rank rotation is easy to follow. Pure presentation — toggles classes
+// only. `data-asset-key` is stamped on every keyed element in renderPeriodicTable.
+let periodicHlKey = null;
+function setPeriodicHighlight(key) {
+  if (key === periodicHlKey) return;
+  periodicHlKey = key;
+  const section = document.getElementById('periodic-section');
+  if (!section) return;
+  section.querySelectorAll('.pt-hl').forEach((el) => el.classList.remove('pt-hl'));
+  if (key) {
+    section.classList.add('pt-focus');
+    section.querySelectorAll(`[data-asset-key="${CSS.escape(key)}"]`)
+      .forEach((el) => el.classList.add('pt-hl'));
+  } else {
+    section.classList.remove('pt-focus');
+  }
+}
+
+function bindPeriodicHighlight(section) {
+  if (!section || section.dataset.hlBound) return;
+  section.dataset.hlBound = '1';
+  // Delegated so it survives every tbody/legend rebuild.
+  section.addEventListener('mouseover', (e) => {
+    const el = e.target.closest('[data-asset-key]');
+    setPeriodicHighlight(el ? el.dataset.assetKey : null);
+  });
+  section.addEventListener('mouseleave', () => setPeriodicHighlight(null));
+}
+
 function renderPeriodicTable() {
   const scroll  = document.getElementById('periodic-scroll');
   const empty   = document.getElementById('periodic-empty');
@@ -791,6 +822,13 @@ function renderPeriodicTable() {
   const tbody   = document.getElementById('periodic-tbody');
   const sub     = document.getElementById('periodic-sub');
   if (!scroll || !thead || !tbody || !legend) return;
+
+  // Highlight state is per-render (cells are rebuilt below): reset it and make
+  // sure the hover handlers are bound to the section once.
+  const section = document.getElementById('periodic-section');
+  bindPeriodicHighlight(section);
+  periodicHlKey = null;
+  if (section) section.classList.remove('pt-focus');
 
   const selected = STATE.step3.selectedAssets.slice();
   if (selected.length < 2) {
@@ -850,6 +888,7 @@ function renderPeriodicTable() {
     const item = document.createElement('span');
     item.className = 'periodic-legend__item';
     item.dataset.group = groupSlug(asset.group);
+    item.dataset.assetKey = k;
     const chip = document.createElement('span');
     chip.className = 'periodic-legend__chip';
     chip.style.background = assetColor(k);
@@ -909,6 +948,7 @@ function renderPeriodicTable() {
       td.style.background = assetColor(entry.key);
       if (assetColorIsDark(entry.key)) td.classList.add('pt-cell--dark');
       td.dataset.group = groupSlug(asset.group);
+      td.dataset.assetKey = entry.key;
       td.title = `${asset.name} · ${y}: ${fmtSignedPct(entry.ret)}\n` +
                  `Rank ${rank + 1} of ${ranked.length}`;
       const label = STEP3_SHORT_LABELS[entry.key] || asset.ticker || asset.name;
@@ -930,6 +970,7 @@ function renderPeriodicTable() {
       td.style.background = assetColor(sumKey);
       if (assetColorIsDark(sumKey)) td.classList.add('pt-summary--dark');
       td.dataset.group = groupSlug(asset.group);
+      td.dataset.assetKey = sumKey;
       td.title = `${asset.name}\n` +
                  `CAGR ${s.cagr == null ? '—' : s.cagr.toFixed(2) + '%'} · ` +
                  `σ ${s.std == null ? '—' : s.std.toFixed(2) + '%'} · ` +

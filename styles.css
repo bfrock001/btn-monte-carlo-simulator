@@ -872,6 +872,20 @@ em { font-style: italic; }
   z-index: 1;
 }
 
+/* Asset spotlight: while hovering one asset (section has .pt-focus), its trail
+   (.pt-hl) stays full-strength and every other cell / summary / legend chip dims,
+   so the highlighted asset's rank rotation reads clearly across the years. */
+#periodic-section .pt-cell,
+#periodic-section .pt-summary,
+#periodic-section .periodic-legend__item { transition: opacity 120ms ease; }
+#periodic-section.pt-focus .pt-cell:not(.pt-hl):not(.pt-cell--empty),
+#periodic-section.pt-focus .pt-summary:not(.pt-hl):not(.pt-summary--empty),
+#periodic-section.pt-focus .periodic-legend__item:not(.pt-hl) { opacity: 0.22; }
+#periodic-section.pt-focus .periodic-legend__item.pt-hl {
+  border-color: var(--ink);
+  box-shadow: 0 0 0 1px var(--ink);
+}
+
 /* Summary column (right side, per-rank CAGR ordering) */
 .periodic-table tbody td.pt-summary {
   min-width: 120px;
