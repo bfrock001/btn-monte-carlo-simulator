@@ -3776,3 +3776,83 @@ em { font-style: italic; }
   padding-bottom: 4px;
   border-bottom: 1px solid rgba(31, 61, 107, 0.12);
 }
+
+/* ===================== Methodology page ===================== */
+.methodology {
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 8px 4px 40px;
+}
+.methodology__header { margin-bottom: 28px; }
+.methodology__title {
+  font-family: var(--font-serif);
+  font-size: 34px;
+  font-weight: 400;
+  letter-spacing: -0.015em;
+  color: var(--ink);
+  margin: 6px 0 14px;
+  line-height: 1.1;
+}
+.methodology__lede {
+  font-family: var(--font-sans);
+  font-size: 16px;
+  line-height: 1.6;
+  color: var(--ink);
+  margin: 0;
+}
+.methodology__section {
+  margin: 0 0 28px;
+  padding-top: 22px;
+  border-top: 1px solid var(--rule);
+}
+.methodology__section h2 {
+  font-family: var(--font-serif);
+  font-size: 21px;
+  font-weight: 400;
+  letter-spacing: -0.01em;
+  color: var(--navy);
+  margin: 0 0 12px;
+}
+.methodology__section p {
+  font-family: var(--font-sans);
+  font-size: 14.5px;
+  line-height: 1.65;
+  color: var(--ink);
+  margin: 0 0 12px;
+}
+.methodology__section ul,
+.methodology__section ol {
+  font-family: var(--font-sans);
+  font-size: 14.5px;
+  line-height: 1.6;
+  color: var(--ink);
+  margin: 0 0 4px;
+  padding-left: 22px;
+}
+.methodology__section li { margin-bottom: 9px; }
+.methodology__section strong { color: var(--ink); font-weight: 600; }
+.methodology__note {
+  font-size: 13px !important;
+  color: var(--faint) !important;
+  border-left: 2px solid var(--rule);
+  padding-left: 12px;
+}
+/* The limitations block gets a quiet clay accent so it reads as the honest caveat. */
+.methodology__limits {
+  background: var(--paper-alt);
+  border: 1px solid var(--rule);
+  border-left: 3px solid var(--clay);
+  border-radius: 3px;
+  padding: 20px 22px;
+}
+.methodology__limits h2 { color: var(--clay); }
+.methodology__closing {
+  border-top: 1px solid var(--rule);
+  padding-top: 22px;
+}
+.methodology__closing p { font-size: 13.5px; color: var(--faint); }
+.methodology__closing a { color: var(--clay); }
+@media (max-width: 560px) {
+  .methodology__title { font-size: 27px; }
+  .methodology__lede { font-size: 15px; }
+}

@@ -229,7 +229,7 @@ function bindPeriodicPortfolioToggle() {
 
 function bindTabs() {
   const tabs = document.querySelectorAll('.tab-btn');
-  const panelIds = { simulator: 'tab-simulator', data: 'tab-data', optimizer: 'tab-optimizer' };
+  const panelIds = { simulator: 'tab-simulator', data: 'tab-data', optimizer: 'tab-optimizer', methodology: 'tab-methodology' };
   tabs.forEach((btn) => {
     btn.addEventListener('click', () => {
       const target = btn.dataset.tab;
@@ -5247,6 +5247,10 @@ function bindTermsModal() {
     // toggle the disclaimer checkbox. The user must explicitly check the box
     // after reading.
     e.stopPropagation();
+    openTermsModal();
+  });
+  document.getElementById('methodology-open-terms')?.addEventListener('click', (e) => {
+    e.preventDefault();
     openTermsModal();
   });
   document.getElementById('terms-modal-close-btn')?.addEventListener('click', closeTermsModal);

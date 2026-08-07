@@ -61,6 +61,7 @@
         <button class="tab-btn is-active" role="tab" data-tab="simulator" id="tab-btn-simulator" aria-selected="true" aria-controls="tab-simulator">Simulator</button>
         <button class="tab-btn" role="tab" data-tab="data" id="tab-btn-data" aria-selected="false" aria-controls="tab-data">Data &amp; Correlations</button>
         <button class="tab-btn" role="tab" data-tab="optimizer" id="tab-btn-optimizer" aria-selected="false" aria-controls="tab-optimizer">Portfolio Optimizer</button>
+        <button class="tab-btn" role="tab" data-tab="methodology" id="tab-btn-methodology" aria-selected="false" aria-controls="tab-methodology">Methodology</button>
       </nav>
 
       <!-- =============== TAB: SIMULATOR =============== -->
@@ -1127,6 +1128,198 @@
         </section>
 
       </div><!-- /tab-optimizer -->
+
+      <!-- ===================== Methodology ===================== -->
+      <div id="tab-methodology" class="tab-panel" role="tabpanel" aria-labelledby="tab-btn-methodology" hidden>
+        <div class="methodology">
+          <header class="methodology__header">
+            <p class="eyebrow">Transparency</p>
+            <h1 class="methodology__title">How this tool works</h1>
+            <p class="methodology__lede">
+              Every number here comes from the same idea: replay a retirement thousands of times against
+              real historical markets, and see how often the money lasts. This page lays out exactly how
+              that&rsquo;s done &mdash; the data, the engine, the strategies, the optimizer &mdash; and, just
+              as important, <strong>what it does not model.</strong> Nothing here is a black box.
+            </p>
+          </header>
+
+          <section class="methodology__section">
+            <h2>1. What this is &mdash; and isn&rsquo;t</h2>
+            <p>
+              This is a <strong>bootstrap Monte Carlo</strong> retirement simulator with a portfolio optimizer
+              bolted on. It runs entirely in your browser &mdash; no data leaves your device, and there is no
+              account or server. It is an <strong>educational</strong> tool for exploring how spending,
+              allocation, and market history interact. It is <strong>not</strong> financial advice, not a
+              prediction, and not tuned to your personal situation, taxes, or goals.
+            </p>
+          </section>
+
+          <section class="methodology__section">
+            <h2>2. The data</h2>
+            <p>
+              Annual total returns and U.S. inflation come from the Bogleheads&rsquo;
+              <strong>Simba Backtesting Spreadsheet</strong>, a long-running community data set of asset-class
+              returns. The tool covers 22 asset classes (US equity by size and style, international developed
+              and emerging, Treasuries by maturity, TIPS, corporates, T-bills, REITs, and gold).
+            </p>
+            <ul>
+              <li><strong>Coverage varies by asset.</strong> Some series start later than others (emerging
+                markets, TIPS). Where a portfolio holds an asset that has no data in a given year, that year is
+                skipped rather than guessed &mdash; the tool tells you when that happens.</li>
+              <li><strong>Some early history is reconstructed.</strong> A few series use proxy/spliced data before
+                their real inception (e.g. TIPS before 1997 is treated as unavailable, not invented).</li>
+              <li><strong>You choose the window:</strong> full data set, post-WWII (1946+), modern era (1972+,
+                the default), or a custom range.</li>
+            </ul>
+          </section>
+
+          <section class="methodology__section">
+            <h2>3. The engine &mdash; one simulated retirement</h2>
+            <p>To simulate a single retirement over an N-year horizon, the engine does this:</p>
+            <ol>
+              <li><strong>Draw the years.</strong> For each year of the horizon it picks one real historical
+                calendar year <em>at random, with replacement</em> (a &ldquo;bootstrap&rdquo;). A 30-year
+                retirement is 30 independently drawn historical years.</li>
+              <li><strong>Keep each year whole.</strong> A drawn year carries <em>all</em> of its asset returns
+                and its inflation together, so the real relationships within a year &mdash; how stocks, bonds,
+                and inflation moved relative to each other &mdash; are preserved.</li>
+              <li><strong>Blend and rebalance.</strong> That year&rsquo;s portfolio return is the weighted mix of
+                your allocation, rebalanced back to your target weights every year.</li>
+              <li><strong>Spend, then grow.</strong> Guaranteed income is netted against your spending; the
+                remainder is withdrawn from the portfolio; what&rsquo;s left earns the drawn year&rsquo;s return.</li>
+              <li><strong>Repeat and tally.</strong> Do this for all N years, then run the whole thing thousands
+                of times (1,000&ndash;10,000, your choice). <strong>&ldquo;Success&rdquo; means the portfolio never
+                hit zero</strong> before the horizon ended.</li>
+            </ol>
+          </section>
+
+          <section class="methodology__section">
+            <h2>4. Real dollars &amp; inflation</h2>
+            <p>
+              Everything you enter and everything you see is in <strong>today&rsquo;s dollars</strong>. Each
+              drawn year carries its actual inflation, and spending is inflated by that bootstrapped inflation
+              path so purchasing power stays constant. Ending values and growth rates are then deflated back to
+              real terms, so a &ldquo;$1M ending value&rdquo; means $1M of <em>today&rsquo;s</em> buying power.
+            </p>
+          </section>
+
+          <section class="methodology__section">
+            <h2>5. Guaranteed income</h2>
+            <p>
+              Social Security, a pension, and an annuity can each be added and are netted against spending each
+              year (any surplus is added back to the portfolio):
+            </p>
+            <ul>
+              <li><strong>Social Security</strong> always receives an inflation COLA. You can model
+                <strong>two earners</strong> (Spouse A and Spouse B), each with their own claim age. Spouse B has
+                their own current age, so their benefits start on <em>their</em> timeline.</li>
+              <li><strong>Pension</strong> &mdash; per spouse, with an optional COLA.</li>
+              <li><strong>Annuity</strong> &mdash; with a start age and an optional stop age, so you can model an
+                annuity that only bridges income until Social Security begins.</li>
+            </ul>
+          </section>
+
+          <section class="methodology__section">
+            <h2>6. Spending strategies</h2>
+            <p>How much you withdraw each year is driven by the strategy you pick on the Simulator tab:</p>
+            <ul>
+              <li><strong>Fixed expense schedule</strong> &mdash; spend your planned amount, inflation-adjusted, every year.</li>
+              <li><strong>Constant dollar</strong> &mdash; the classic &ldquo;4% rule&rdquo; shape: year one&rsquo;s amount, inflated annually thereafter.</li>
+              <li><strong>Forgo inflation in down years</strong> &mdash; skip the inflation raise after a losing year; the skipped raise stays invested.</li>
+              <li><strong>Actual spending decline</strong> &mdash; let real spending drift down over time, matching how retirees actually spend less as they age.</li>
+              <li><strong>Guyton-Klinger guardrails</strong> &mdash; cut spending after bad markets, raise it after good ones, within upper/lower guardrails.</li>
+              <li><strong>Vanguard dynamic spending</strong> &mdash; a ceiling-and-floor rule that caps how much the withdrawal can rise or fall year to year.</li>
+            </ul>
+          </section>
+
+          <section class="methodology__section">
+            <h2>7. Sequence-of-returns stress test</h2>
+            <p>
+              Optionally, each simulation can be forced to take its <strong>worst historical year first</strong>
+              (or 2008 specifically). Front-loading a crash is the hardest test of a plan, because a big loss
+              early &mdash; while withdrawals continue &mdash; does the most lasting damage. This is off by default.
+            </p>
+          </section>
+
+          <section class="methodology__section">
+            <h2>8. What the numbers mean</h2>
+            <ul>
+              <li><strong>Chance of success</strong> &mdash; the share of simulated retirements that never ran out of money.</li>
+              <li><strong>Real median CAGR</strong> &mdash; the middle simulation&rsquo;s annualized real growth rate.</li>
+              <li><strong>Median ending value (real)</strong> &mdash; the middle simulation&rsquo;s leftover balance, in today&rsquo;s dollars.</li>
+              <li><strong>Max drawdown</strong> &mdash; the deepest peak-to-trough drop of the <em>investments themselves</em> (ignoring withdrawals): how severe a bear market the mix would have ridden through. Reported as the median across simulations.</li>
+            </ul>
+            <p class="methodology__note">
+              Medians are used rather than averages because a few extreme lucky runs can pull an average far from
+              a typical outcome. Every figure is a Monte-Carlo <em>estimate</em> and carries sampling error.
+            </p>
+          </section>
+
+          <section class="methodology__section">
+            <h2>9. The Portfolio Optimizer</h2>
+            <p>
+              The optimizer answers the inverse of the Simulator: <em>which mix gives the most growth while
+              keeping my chance of success at or above a floor?</em> It holds your entire Simulator plan fixed
+              &mdash; balance, horizon, spending, income, strategy, period &mdash; and varies <strong>only the
+              allocation</strong>, scoring every candidate through the same engine above.
+            </p>
+            <ul>
+              <li><strong>Two ways to search.</strong> <em>Optimize Freely</em> sweeps a constrained grid of your
+                chosen asset classes (with per-asset min/max limits and a weight step). <em>Two-step</em> first
+                finds the best stock/bond split, then refines the sub-classes inside that locked split.</li>
+              <li><strong>The winner</strong> is the mix with the highest real median growth that still clears your
+                <strong>success floor</strong> and an optional <strong>max-drawdown cap</strong>.</li>
+              <li><strong>Fair comparison.</strong> Only assets with full data over your plan period enter the
+                search, so every mix is judged over the same window.</li>
+              <li><strong>Common Random Numbers.</strong> Every candidate mix is scored on the <em>same</em> set of
+                bootstrapped return sequences. That way the difference between two mixes reflects the allocation
+                change &mdash; not which random retirements each happened to draw &mdash; so the comparison curves
+                are smooth and meaningful instead of jagged with sampling noise.</li>
+            </ul>
+          </section>
+
+          <section class="methodology__section">
+            <h2>10. Data &amp; Correlations</h2>
+            <p>The reference tab shows the raw material behind the model:</p>
+            <ul>
+              <li><strong>Reference stats</strong> &mdash; each asset&rsquo;s historical CAGR and volatility over your window.</li>
+              <li><strong>Correlation matrix</strong> &mdash; Pearson correlation of annual returns over each pair&rsquo;s common years (minimum 10 overlapping years).</li>
+              <li><strong>Periodic table of returns</strong> &mdash; a Callan-style year-by-year ranking; you can overlay your loaded portfolio to see how the blend placed each calendar year.</li>
+            </ul>
+          </section>
+
+          <section class="methodology__section methodology__limits">
+            <h2>11. Assumptions &amp; limitations</h2>
+            <p>Read this part. A model is only as honest as the caveats it admits:</p>
+            <ul>
+              <li><strong>History is not destiny.</strong> The future can look unlike any window in the data.</li>
+              <li><strong>Single-year resampling understates sequence-of-returns risk.</strong> Because each year is
+                drawn independently, the tool breaks up the real-world <em>clustering</em> of good and bad years &mdash;
+                a 2000&ndash;2002 or 2007&ndash;2009 run rarely survives intact. It captures the range of one-year
+                outcomes well, but sustained multi-year bear markets can run longer than the reshuffle implies.
+                (The sequence-of-returns stress test is a partial answer.)</li>
+              <li><strong>No taxes, fees, or costs.</strong> No income or capital-gains tax, fund expense ratios,
+                advisor fees, or trading costs are modeled.</li>
+              <li><strong>No account-type or RMD modeling.</strong> Tax-deferred, Roth, and taxable dollars are all
+                treated the same; required minimum distributions are not simulated.</li>
+              <li><strong>Frictionless rebalancing.</strong> The portfolio is rebalanced exactly to target every year, for free.</li>
+              <li><strong>Fixed horizon, no mortality.</strong> The plan runs the full period you set. For couples,
+                both income streams run the whole horizon &mdash; there is no survivor-benefit transition when one
+                spouse would pass.</li>
+              <li><strong>Estimates, not answers.</strong> Every figure is a Monte-Carlo estimate; it carries sampling
+                error and will shift slightly each time you run.</li>
+            </ul>
+          </section>
+
+          <section class="methodology__section methodology__closing">
+            <p>
+              This tool is for education and exploration only. It is not personalized financial advice, and it
+              cannot account for your full circumstances. For decisions about your own money, talk with a
+              qualified professional. See the <a href="#" id="methodology-open-terms" class="disclaimer__link">Terms of Use</a> for the full disclaimer.
+            </p>
+          </section>
+        </div>
+      </div><!-- /tab-methodology -->
     </div><!-- /app-shell -->
   </main>
 
