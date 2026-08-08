@@ -81,7 +81,7 @@ btn-logo.svg            — channel mark
 
 The visual language follows the
 [Beyond the Noise brand kit](https://github.com/) (Editorial palette by
-default — paper, ink, navy, gold, teal, clay), using Instrument Serif for
+default — paper, ink, navy, gold, teal, clay), using Cormorant Garamond for
 display copy and IBM Plex Sans for body / data.
 
 ---

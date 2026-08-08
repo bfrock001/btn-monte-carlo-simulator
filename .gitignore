@@ -12,3 +12,6 @@ monte_carlo_requirements.md.pdf
 
 # Test outputs from PDF export verification
 btn-test-*.pdf
+
+# FUSE temp files (never commit)
+.fuse_hidden*

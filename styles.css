@@ -5,20 +5,20 @@
 
 :root {
   /* Neutrals */
-  --paper:      #F1ECE2;
+  --paper:      #ECE6D9;
   --paper-alt:  #EDE7DA;
-  --ink:        #14181E;
-  --soft:       #5A554C;
-  --faint:      #9C958A;
+  --ink:        #1B2129;
+  --soft:       #57534A;
+  --faint:      #928A7B;
   --rule:       rgba(20, 24, 30, 0.14);
   --grid:       rgba(20, 24, 30, 0.10);
   --grid-faint: rgba(20, 24, 30, 0.05);
 
   /* Editorial accents */
-  --clay: #C84A30;
-  --teal: #1A6E6E;
-  --navy: #1F3D6B;
-  --gold: #B58820;
+  --clay: #C44A30;
+  --teal: #2C7370;
+  --navy: #1E3A5F;
+  --gold: #B8932A;
 
   /* Semantic */
   --color-success: var(--teal);
@@ -27,7 +27,7 @@
   --color-primary: var(--navy);
 
   /* Typography */
-  --font-serif: 'Instrument Serif', 'Cormorant Garamond', Georgia, serif;
+  --font-serif: 'Cormorant Garamond', Georgia, serif;
   --font-sans:  'IBM Plex Sans', system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
   --font-mono:  'IBM Plex Mono', 'SF Mono', 'Fira Code', ui-monospace, monospace;
 }
@@ -2914,7 +2914,7 @@ em { font-style: italic; }
   .print-header {
     padding-bottom: 10px;
     margin-bottom: 16px;
-    border-bottom: 1.4px solid #14181E;
+    border-bottom: 1.4px solid #1B2129;
   }
   .print-header__brand {
     display: flex;
@@ -2924,15 +2924,15 @@ em { font-style: italic; }
   .print-header__mark {
     width: 22px; height: 22px;
     border-radius: 50%;
-    background: #B58820;
+    background: #B8932A;
     display: inline-block;
     color: transparent;
   }
   .print-header__title {
-    font-family: 'Instrument Serif', Georgia, serif;
+    font-family: 'Cormorant Garamond', Georgia, serif;
     font-size: 22px;
     line-height: 1.1;
-    color: #14181E;
+    color: #1B2129;
   }
   .print-header__title em { font-style: italic; }
   .print-header__sub {
@@ -2940,20 +2940,20 @@ em { font-style: italic; }
     font-size: 11px;
     text-transform: uppercase;
     letter-spacing: 0.08em;
-    color: #5A554C;
+    color: #57534A;
     margin-top: 2px;
   }
   .print-header__rule { display: none; }
   .print-header__scenario {
-    font-family: 'Instrument Serif', Georgia, serif;
+    font-family: 'Cormorant Garamond', Georgia, serif;
     font-size: 18px;
-    color: #14181E;
+    color: #1B2129;
     margin-top: 10px;
   }
   .print-header__meta {
     font-family: 'IBM Plex Mono', monospace;
     font-size: 10px;
-    color: #5A554C;
+    color: #57534A;
     margin-top: 2px;
   }
 
@@ -3008,7 +3008,7 @@ em { font-style: italic; }
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.08em;
-    color: #5A554C;
+    color: #57534A;
     margin: 0 0 6px;
   }
   .print-table {
@@ -3016,13 +3016,13 @@ em { font-style: italic; }
     border-collapse: collapse;
     font-family: 'IBM Plex Sans', sans-serif;
     font-size: 11px;
-    color: #14181E;
+    color: #1B2129;
   }
   .print-table tr { border-bottom: 1px solid #e5e2dc; }
   .print-table th {
     text-align: left;
     font-weight: 500;
-    color: #5A554C;
+    color: #57534A;
     padding: 5px 0;
     width: 38%;
   }
@@ -3037,7 +3037,7 @@ em { font-style: italic; }
     border-top: 1px solid #cdcaca;
     font-family: 'IBM Plex Sans', sans-serif;
     font-size: 9px;
-    color: #5A554C;
+    color: #57534A;
     line-height: 1.4;
   }
 
@@ -3058,7 +3058,7 @@ em { font-style: italic; }
     margin-bottom: 10px !important;
   }
   #tab-data .reference-heading { font-size: 20px !important; }
-  #tab-data .eyebrow { color: #5A554C !important; }
+  #tab-data .eyebrow { color: #57534A !important; }
 
   /* Correlation matrix in print: compact, letterbox scroll disabled */
   #tab-data .correlation-scroll {

@@ -1896,10 +1896,10 @@ function renderOptimizerStep1Chart(run) {
   const canvas = document.getElementById('opt-step1-chart');
   if (!canvas || typeof Chart === 'undefined') return;
   const css = (n, f) => (getComputedStyle(document.documentElement).getPropertyValue(n).trim() || f);
-  const teal = css('--teal', '#1A6E6E');
-  const gold = css('--gold', '#B58820');
-  const clay = css('--clay', '#C84A30');
-  const navy = css('--navy', '#1F3D6B');
+  const teal = css('--teal', '#2C7370');
+  const gold = css('--gold', '#B8932A');
+  const clay = css('--clay', '#C44A30');
+  const navy = css('--navy', '#1E3A5F');
 
   const pts = [...run.points].sort((a, b) =>
     optimizerStep1EquityPct(a, run.equityKey) - optimizerStep1EquityPct(b, run.equityKey));
@@ -2465,9 +2465,9 @@ function renderOptimizerStep2Chart(res, meta) {
   const canvas = document.getElementById('opt-step2-chart');
   if (!canvas || typeof Chart === 'undefined') return;
   const css = (n, f) => (getComputedStyle(document.documentElement).getPropertyValue(n).trim() || f);
-  const teal = css('--teal', '#1A6E6E');
-  const clay = css('--clay', '#C84A30');
-  const navy = css('--navy', '#1F3D6B');
+  const teal = css('--teal', '#2C7370');
+  const clay = css('--clay', '#C44A30');
+  const navy = css('--navy', '#1E3A5F');
   const faint = css('--faint', '#c7c7c7');
 
   const { points, ddCap } = meta;
@@ -3395,9 +3395,9 @@ function renderOptimizerFreeChart(res, meta) {
   const canvas = document.getElementById('opt-free-chart');
   if (!canvas || typeof Chart === 'undefined') return;
   const css = (n, f) => (getComputedStyle(document.documentElement).getPropertyValue(n).trim() || f);
-  const teal = css('--teal', '#1A6E6E');
-  const clay = css('--clay', '#C84A30');
-  const navy = css('--navy', '#1F3D6B');
+  const teal = css('--teal', '#2C7370');
+  const clay = css('--clay', '#C44A30');
+  const navy = css('--navy', '#1E3A5F');
   const faint = css('--faint', '#c7c7c7');
 
   const { floorPct, ddCap } = meta;
@@ -6296,12 +6296,12 @@ function renderPortfolioFanChart(results, mode) {
   for (let i = 0; i <= py; i++) labels.push(sa + i);
 
   // Brand colors
-  const NAVY      = '#1F3D6B';
+  const NAVY      = '#1E3A5F';
   const NAVY_15   = 'rgba(31, 61, 107, 0.13)';
   const NAVY_25   = 'rgba(31, 61, 107, 0.22)';
-  const GOLD      = '#B58820';
-  const CLAY      = '#C84A30';
-  const INK       = '#14181E';
+  const GOLD      = '#B8932A';
+  const CLAY      = '#C44A30';
+  const INK       = '#1B2129';
 
   const p = (key) => mode === 'real' ? paths[`real_${key}`] : paths[key];
 
@@ -6562,12 +6562,12 @@ function renderIncomeFanChart(results, mode) {
   const labels = [];
   for (let i = 0; i < py; i++) labels.push(sa + i + 1);
 
-  const NAVY    = '#1F3D6B';
+  const NAVY    = '#1E3A5F';
   const NAVY_15 = 'rgba(31, 61, 107, 0.13)';
   const NAVY_25 = 'rgba(31, 61, 107, 0.22)';
-  const GOLD    = '#B58820';
-  const CLAY    = '#C84A30';
-  const INK     = '#14181E';
+  const GOLD    = '#B8932A';
+  const CLAY    = '#C44A30';
+  const INK     = '#1B2129';
 
   const p = (key) => mode === 'real' ? paths[`real_${key}`] : paths[key];
   // Whether to show filled bands: skip for near-deterministic strategies (None / CD)
@@ -6723,9 +6723,9 @@ function renderGuardrailHeatmap(results) {
   const labels = [];
   for (let i = 0; i < py; i++) labels.push(sa + i + 1);
 
-  const CLAY = '#C84A30';
-  const TEAL = '#1A6E6E';
-  const INK  = '#14181E';
+  const CLAY = '#C44A30';
+  const TEAL = '#2C7370';
+  const INK  = '#1B2129';
 
   guardrailHeatmapChart = new Chart(canvas.getContext('2d'), {
     type: 'bar',
@@ -6779,9 +6779,9 @@ function renderVDSHeatmap(results) {
   const labels = [];
   for (let i = 0; i < py; i++) labels.push(sa + i + 1);
 
-  const CLAY = '#C84A30';
-  const TEAL = '#1A6E6E';
-  const INK  = '#14181E';
+  const CLAY = '#C44A30';
+  const TEAL = '#2C7370';
+  const INK  = '#1B2129';
 
   guardrailHeatmapChart = new Chart(canvas.getContext('2d'), {
     type: 'bar',
