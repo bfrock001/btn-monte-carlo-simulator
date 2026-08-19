@@ -36,7 +36,7 @@ const DATA_URL = './simba_returns_data.json';
 // a plain refresh can keep running an OLD engine even after the file changed on
 // disk. Appending a version the workers are loaded with forces a fresh fetch.
 // Bump this whenever simulation.worker.js changes.
-const WORKER_VERSION = 'c18y';
+const WORKER_VERSION = 'c19c';
 const WORKER_URL = `./simulation.worker.js?v=${WORKER_VERSION}`;
 
 /* -----------------------------------------------------------
@@ -2417,9 +2417,10 @@ function renderOptimizerStep2Results(res, meta) {
   const frontierRows = optimizerTableRows(res, OPTIMIZER_TABLE_MIN_ROWS);
   let table = '';
   if (frontierRows.length) {
-    const rows = frontierRows.map((p) => {
+    const rows = frontierRows.map((p, i) => {
       const isBest = p === best;
       return `<tr class="${isBest ? 'is-best' : ''}${p.qualifies ? '' : ' is-belowfloor'}">` +
+        `<td class="optimizer-rt__use"><button type="button" class="optimizer-rowload" data-idx="${i}" title="Load this portfolio into the Simulator">Load</button></td>` +
         `<td class="optimizer-rt__alloc">${optimizerAllocationSummary(p.allocation)}${isBest ? ' <span class="optimizer-tag">best</span>' : ''}</td>` +
         `<td class="num">${optimizerFmtPct(p.success_rate_pct)}</td>` +
         `<td class="num">${optimizerFmtPct(p.cagr_real_mean, 2)}</td>` +
@@ -2430,9 +2431,9 @@ function renderOptimizerStep2Results(res, meta) {
     }).join('');
     const dimNote = ddCap != null ? 'Rows failing your floor or drawdown cap are dimmed.' : 'Rows below your floor are dimmed.';
     table =
-      `<div class="optimizer-rt-head">Efficient frontier <span class="field-note small">— non-dominated mixes within your locked split; your winner is highlighted. ${dimNote}</span></div>` +
+      `<div class="optimizer-rt-head">Efficient frontier <span class="field-note small">— non-dominated mixes within your locked split; your winner is highlighted. Click <strong>Load</strong> on any row to use that mix. ${dimNote}</span></div>` +
       `<div class="table-wrap"><table class="optimizer-rt"><thead><tr>` +
-        `<th>Allocation</th><th class="num">Success</th><th class="num">Avg CAGR (real)</th><th class="num">Median CAGR (real)</th><th class="num">Median ending (real)</th><th class="num">Max drawdown</th>` +
+        `<th aria-label="Load"></th><th>Allocation</th><th class="num">Success</th><th class="num">Avg CAGR (real)</th><th class="num">Median CAGR (real)</th><th class="num">Median ending (real)</th><th class="num">Max drawdown</th>` +
       `</tr></thead><tbody>${rows}</tbody></table></div>`;
   }
 
@@ -2451,6 +2452,13 @@ function renderOptimizerStep2Results(res, meta) {
 
   const loadBtn = document.getElementById('opt-step2-load-sim');
   if (loadBtn && pick) loadBtn.addEventListener('click', () => loadAllocationIntoSimulator(pick.allocation));
+  // Per-row "Load" — pick any refined mix on the frontier, not just the winner.
+  box.querySelectorAll('.optimizer-rowload').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const row = frontierRows[parseInt(btn.dataset.idx, 10)];
+      if (row) loadAllocationIntoSimulator(row.allocation);
+    });
+  });
   const jsonBtn = document.getElementById('opt-step2-export-json');
   if (jsonBtn) jsonBtn.addEventListener('click', exportOptimizerJSON);
   const csvBtn = document.getElementById('opt-step2-export-csv');
@@ -3343,9 +3351,10 @@ function renderOptimizerResults(res, meta) {
   const frontierRows = optimizerTableRows(res, OPTIMIZER_TABLE_MIN_ROWS);
   let table = '';
   if (frontierRows.length) {
-    const rows = frontierRows.map((p) => {
+    const rows = frontierRows.map((p, i) => {
       const isBest = p === best;
       return `<tr class="${isBest ? 'is-best' : ''}${p.qualifies ? '' : ' is-belowfloor'}">` +
+        `<td class="optimizer-rt__use"><button type="button" class="optimizer-rowload" data-idx="${i}" title="Load this portfolio into the Simulator">Load</button></td>` +
         `<td class="optimizer-rt__alloc">${optimizerAllocationSummary(p.allocation)}${isBest ? ' <span class="optimizer-tag">best</span>' : ''}</td>` +
         `<td class="num">${optimizerFmtPct(p.success_rate_pct)}</td>` +
         `<td class="num">${optimizerFmtPct(p.cagr_real_mean, 2)}</td>` +
@@ -3356,9 +3365,9 @@ function renderOptimizerResults(res, meta) {
     }).join('');
     const dimNote = ddCap != null ? 'Rows failing your floor or drawdown cap are dimmed.' : 'Rows below your floor are dimmed.';
     table =
-      `<div class="optimizer-rt-head">Efficient frontier <span class="field-note small">— non-dominated portfolios (success ↑, real median CAGR ↑); your winner is highlighted. ${dimNote}</span></div>` +
+      `<div class="optimizer-rt-head">Efficient frontier <span class="field-note small">— non-dominated portfolios (success ↑, real median CAGR ↑); your winner is highlighted. Click <strong>Load</strong> on any row to use that portfolio. ${dimNote}</span></div>` +
       `<div class="table-wrap"><table class="optimizer-rt"><thead><tr>` +
-        `<th>Allocation</th><th class="num">Success</th><th class="num">Avg CAGR (real)</th><th class="num">Median CAGR (real)</th><th class="num">Median ending (real)</th><th class="num">Max drawdown</th>` +
+        `<th aria-label="Load"></th><th>Allocation</th><th class="num">Success</th><th class="num">Avg CAGR (real)</th><th class="num">Median CAGR (real)</th><th class="num">Median ending (real)</th><th class="num">Max drawdown</th>` +
       `</tr></thead><tbody>${rows}</tbody></table></div>`;
   }
 
@@ -3379,6 +3388,13 @@ function renderOptimizerResults(res, meta) {
 
   const loadBtn = document.getElementById('optimizer-load-sim');
   if (loadBtn && pick) loadBtn.addEventListener('click', () => loadAllocationIntoSimulator(pick.allocation));
+  // Per-row "Load" — let the user pick any portfolio on the frontier, not just the winner.
+  box.querySelectorAll('.optimizer-rowload').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const row = frontierRows[parseInt(btn.dataset.idx, 10)];
+      if (row) loadAllocationIntoSimulator(row.allocation);
+    });
+  });
   const jsonBtn = document.getElementById('optimizer-export-json');
   if (jsonBtn) jsonBtn.addEventListener('click', exportOptimizerJSON);
   const csvBtn = document.getElementById('optimizer-export-csv');
@@ -4015,6 +4031,7 @@ function onWorkerMessage(e) {
     WORKER.busy = false;
     setRunButtonBusy(false);
     refreshRunButtonState();
+    if (window.WIZARD) WIZARD.refresh();   // relabel sticky button to "Re-run"
   } else if (msg.type === 'error') {
     devShowError(msg.message || 'Unknown simulation error.');
     WORKER.busy = false;
@@ -4037,6 +4054,7 @@ function setRunButtonBusy(busy) {
 const ASSET_GROUPS_FOR_DROPDOWN = ['US Equity', 'International Equity', 'Fixed Income', 'Alternatives'];
 
 const DEFAULTS = {
+  household: 'single', // 'single' | 'couple' — gates all Spouse B inputs
   current_age: 60,
   spouse_b_age: 60,   // Spouse B's current age; their SS/pension start relative to it
   period_years: 30,
@@ -4048,6 +4066,7 @@ const DEFAULTS = {
   sor_force_2008: false,
   inflation_adjust: true,
   expense_mode: 'annual', // 'annual' | 'monthly'
+  spending_smile: false,  // Blanchett Spending Smile: age-based real spending curve vs flat
   initial_balance: 1_000_000,
   allocations: [
     { key: 'sp500',      pct: 60 },
@@ -4062,7 +4081,7 @@ const DEFAULTS = {
   pension:   { amount: 0, start_age: 65, cola: false },
   ss_b:      { amount: 0, start_age: 67 },
   pension_b: { amount: 0, start_age: 65, cola: false },
-  annuity:   { amount: 0, start_age: 65, stop_age: null, cola: false }, // stop_age null = lifetime
+  annuity:   { amount: 0, start_age: 65, stop_age: null, increase_pct: 0 }, // stop_age null = lifetime; increase_pct = fixed annual step-up (0 = level)
   // Buckets — one expense per 5 years. Default first bucket is blank;
   // user must enter at least bucket 1 expense before Run enables.
   bucket1_default_expense: 0,
@@ -4082,6 +4101,7 @@ const DEFAULTS = {
 
 // Mutable working state for the form
 const INPUT_STATE = {
+  household: DEFAULTS.household,
   current_age: DEFAULTS.current_age,
   spouse_b_age: DEFAULTS.spouse_b_age,
   period_years: DEFAULTS.period_years,
@@ -4093,6 +4113,7 @@ const INPUT_STATE = {
   sor_force_2008: DEFAULTS.sor_force_2008,
   inflation_adjust: DEFAULTS.inflation_adjust,
   expense_mode: DEFAULTS.expense_mode,
+  spending_smile: DEFAULTS.spending_smile,
   expenses_uniform: true,            // when true, all buckets sync to Bucket 1
   initial_balance: DEFAULTS.initial_balance,
   allocations: DEFAULTS.allocations.map((a) => ({ ...a })),
@@ -4133,6 +4154,9 @@ function initInputPanel() {
   bindStrategyModal();
   bindTermsModal();
   bindExportButtons();
+
+  // Wizard nav + rail (presentation layer over the state above)
+  WIZARD.init();
 
   // Initial validation pass
   refreshAllDerived();
@@ -4383,12 +4407,32 @@ function buildBucketsArray(periodYears, existing) {
   return out;
 }
 
+// Blanchett Spending Smile — real spending multipliers R_t (1-indexed by year),
+// mirroring the worker exactly. R_1 = 1.0 (Year-1 baseline); each year compounds by
+// rΔS(prior age) = 0.00008·age² − 0.0125·age + 0.474589.
+function computeSmileMultipliers(periodYears, currentAge) {
+  const R = new Array(periodYears + 1);
+  R[1] = 1.0;
+  for (let t = 2; t <= periodYears; t++) {
+    const agePrev = currentAge + (t - 2);
+    const rDeltaS = 0.00008 * agePrev * agePrev - 0.0125 * agePrev + 0.474589;
+    R[t] = R[t - 1] * (1 + rDeltaS);
+  }
+  return R;
+}
+
 function renderBuckets() {
   const container = document.getElementById('buckets-container');
   if (!container) return;
   container.innerHTML = '';
   const monthly = INPUT_STATE.expense_mode === 'monthly';
   const uniform = INPUT_STATE.expenses_uniform;
+
+  // Spending Smile shapes real spending from Bucket 1 (E0); buckets 2-N become
+  // curve-driven display-only. Precompute the multiplier path once.
+  const smileActive = !!INPUT_STATE.spending_smile;
+  const smileR   = smileActive ? computeSmileMultipliers(INPUT_STATE.period_years, INPUT_STATE.current_age) : null;
+  const smileE0  = INPUT_STATE.buckets[0]?.expense || 0;
 
   // Strategies that lock buckets 2-N (visually + functionally disabled):
   // Constant Dollar uses only bucket 1. Actual Spending Decline carries forward
@@ -4407,9 +4451,17 @@ function renderBuckets() {
     const startAge  = INPUT_STATE.current_age + (startYear - 1);
     const endAge    = INPUT_STATE.current_age + (endYear - 1);
 
+    // Smile: average real spending for this bucket's years (today's $) = E0 × mean(R_t).
+    let smileAvgAnnual = 0;
+    if (smileActive) {
+      let sum = 0, n = 0;
+      for (let t = startYear; t <= endYear; t++) { sum += (smileR[t] || 1); n++; }
+      smileAvgAnnual = smileE0 * (n ? sum / n : 1);
+    }
+
     const wrap = document.createElement('div');
     wrap.className = 'bucket';
-    if ((uniform || cdLockBuckets) && idx > 0) wrap.classList.add('bucket--locked');
+    if ((uniform || cdLockBuckets || smileActive) && idx > 0) wrap.classList.add('bucket--locked');
 
     const header = document.createElement('div');
     header.className = 'bucket__header';
@@ -4434,10 +4486,10 @@ function renderBuckets() {
     lbl.setAttribute('for', `bucket-${idx}`);
     labelRow.appendChild(lbl);
 
-    if ((uniform || cdLockBuckets) && idx > 0) {
+    if ((uniform || cdLockBuckets || smileActive) && idx > 0) {
       const synced = document.createElement('span');
       synced.className = 'bucket__carry';
-      synced.textContent = cdLockBuckets ? 'not used' : '= Bucket 1';
+      synced.textContent = smileActive ? 'set by Smile' : (cdLockBuckets ? 'not used' : '= Bucket 1');
       labelRow.appendChild(synced);
     } else if (!bucket.manual && idx > 0 && bucket.expense > 0) {
       const carry = document.createElement('span');
@@ -4454,9 +4506,16 @@ function renderBuckets() {
     input.inputMode = 'numeric';
     input.autocomplete = 'off';
     const displayVal = monthly ? Math.round((bucket.expense || 0) / 12) : (bucket.expense || 0);
-    input.value = bucket.expense > 0 ? formatCurrency(displayVal) : '$0';
+    if (smileActive && idx > 0) {
+      // Future buckets are curve-driven: show the Smile's average spending for the
+      // period, in today's dollars (read-only), instead of a flat Year-1 value.
+      const v = monthly ? Math.round(smileAvgAnnual / 12) : Math.round(smileAvgAnnual);
+      input.value = smileE0 > 0 ? formatCurrency(v) : '$0';
+    } else {
+      input.value = bucket.expense > 0 ? formatCurrency(displayVal) : '$0';
+    }
 
-    if ((uniform || cdLockBuckets) && idx > 0) {
+    if ((uniform || cdLockBuckets || smileActive) && idx > 0) {
       input.disabled = true;
     } else {
       // Shared logic for propagating bucket 1's value across uniform/carry-forward buckets.
@@ -4500,9 +4559,22 @@ function renderBuckets() {
     }
     wrap.appendChild(input);
 
-    // Strategy callout for buckets 2+ under non-Constant strategies.
-    // Field stays editable; the callout just explains what happens.
-    if (idx > 0) {
+    // Spending Smile: Bucket 1 stays the editable Year-1 baseline (E0). Show its own
+    // period average here so the slightly higher early-retirement peak in the future
+    // buckets reads clearly (spending rises to ~age 65 before easing).
+    if (smileActive && idx === 0) {
+      const v = monthly ? Math.round(smileAvgAnnual / 12) : Math.round(smileAvgAnnual);
+      const smileLine = document.createElement('div');
+      smileLine.className = 'bucket__smile';
+      smileLine.textContent = smileE0 > 0
+        ? `Year-1 baseline · yrs ${startYear}–${endYear} average ≈ ${formatCurrency(v)} / ${monthly ? 'mo' : 'yr'}`
+        : 'Enter your Year-1 baseline; future buckets fill from the Smile curve.';
+      wrap.appendChild(smileLine);
+    }
+
+    // Strategy callout for buckets 2+ under non-Constant strategies. Suppressed when
+    // the Smile is active (the "set by Smile" label + average already explain it).
+    if (idx > 0 && !smileActive) {
       const note = strategyBucketNote(INPUT_STATE.distribution_strategy);
       if (note) {
         const callout = document.createElement('div');
@@ -4604,6 +4676,7 @@ function syncSimpleInputsFromState() {
   setChecked('sor-force-2008',   INPUT_STATE.sor_force_2008);
   setChecked('inflation-toggle', INPUT_STATE.inflation_adjust);
   setChecked('expense-mode',     INPUT_STATE.expense_mode === 'monthly');
+  setChecked('spending-smile',   INPUT_STATE.spending_smile);
   setChecked('uniform-expense',  INPUT_STATE.expenses_uniform);
 
   setVal('ss-amount',      formatCurrency(INPUT_STATE.ss.amount));
@@ -4620,7 +4693,7 @@ function syncSimpleInputsFromState() {
   setVal('annuity-amount', formatCurrency(INPUT_STATE.annuity.amount));
   setVal('annuity-start-age', INPUT_STATE.annuity.start_age);
   setVal('annuity-stop-age',  INPUT_STATE.annuity.stop_age == null ? '' : INPUT_STATE.annuity.stop_age);
-  setChecked('annuity-cola',   INPUT_STATE.annuity.cola);
+  setVal('annuity-increase',   INPUT_STATE.annuity.increase_pct);
 
   // Strategy
   setVal('distribution-strategy', INPUT_STATE.distribution_strategy);
@@ -4691,6 +4764,7 @@ function bindInputEvents() {
   });
   document.getElementById('n-simulations')?.addEventListener('change', (e) => {
     INPUT_STATE.n_simulations = parseInt(e.target.value, 10) || DEFAULTS.n_simulations;
+    refreshAllDerived();   // keep the rail's assumptions summary live
   });
 
   // Historical period
@@ -4712,7 +4786,7 @@ function bindInputEvents() {
   // SoR + inflation toggles
   document.getElementById('sor-toggle')?.addEventListener('change', (e) => {
     INPUT_STATE.sequence_of_returns = e.target.checked;
-    refreshSorUi();
+    refreshAllDerived();   // refreshSorUi + rail assumptions summary
   });
   document.getElementById('sor-force-2008')?.addEventListener('change', (e) => {
     INPUT_STATE.sor_force_2008 = e.target.checked;
@@ -4722,12 +4796,21 @@ function bindInputEvents() {
     INPUT_STATE.inflation_adjust = e.target.checked;
     const w = document.getElementById('inflation-warning');
     if (w) w.hidden = INPUT_STATE.inflation_adjust;
+    refreshAllDerived();
   });
 
   // Expense mode (Annual / Monthly)
   document.getElementById('expense-mode')?.addEventListener('change', (e) => {
     INPUT_STATE.expense_mode = e.target.checked ? 'monthly' : 'annual';
     renderBuckets();
+  });
+
+  // Blanchett Spending Smile (age-based real spending curve vs flat)
+  document.getElementById('spending-smile')?.addEventListener('change', (e) => {
+    INPUT_STATE.spending_smile = e.target.checked;
+    refreshSmileUi();
+    renderBuckets();
+    refreshAllDerived();
   });
 
   // Use Bucket 1 for all buckets
@@ -4793,7 +4876,8 @@ function bindInputEvents() {
     // Lifetime and reflect that in the select so the state can't be inconsistent.
     if (INPUT_STATE.annuity.stop_age != null && INPUT_STATE.annuity.stop_age < INPUT_STATE.annuity.start_age) {
       INPUT_STATE.annuity.stop_age = null;
-      setVal('annuity-stop-age', '');
+      const stopSel = document.getElementById('annuity-stop-age');
+      if (stopSel) stopSel.value = '';
     }
     refreshAllDerived();
   });
@@ -4801,11 +4885,15 @@ function bindInputEvents() {
     const v = parseInt(e.target.value, 10);
     // Blank ("Lifetime") or a value before the start age ⇒ no stop (lifetime).
     INPUT_STATE.annuity.stop_age = (Number.isFinite(v) && v >= INPUT_STATE.annuity.start_age) ? v : null;
-    if (INPUT_STATE.annuity.stop_age == null && e.target.value !== '') setVal('annuity-stop-age', '');
+    if (INPUT_STATE.annuity.stop_age == null && e.target.value !== '') e.target.value = '';
     refreshAllDerived();
   });
-  document.getElementById('annuity-cola')?.addEventListener('change', (e) => {
-    INPUT_STATE.annuity.cola = e.target.checked;
+  document.getElementById('annuity-increase')?.addEventListener('change', (e) => {
+    let v = parseFloat(e.target.value);
+    if (!Number.isFinite(v) || v < 0) v = 0;
+    if (v > 5) v = 5;
+    INPUT_STATE.annuity.increase_pct = v;
+    e.target.value = v;   // reflect any clamp
     refreshAllDerived();
   });
 
@@ -4842,11 +4930,28 @@ function refreshAllDerived() {
   refreshBalanceError();
   refreshNetDraw();
   refreshSorUi();
+  refreshSmileUi();
   // Strategy live previews — update whenever underlying inputs (bucket 1, balance, income, ages) change.
   if (INPUT_STATE.distribution_strategy === 'actual_spending')  updateActualSpendingPreview();
   if (INPUT_STATE.distribution_strategy === 'guyton_klinger')   updateGKPreview();
   if (INPUT_STATE.distribution_strategy === 'vanguard_dynamic') updateVDSPreview();
   refreshRunButtonState();
+  if (window.WIZARD) WIZARD.refresh();   // rail summaries + per-step valid/invalid marks
+}
+
+// Strategies whose per-year spending is bucket-driven, so the Spending Smile reshapes them.
+// The others anchor only on Year 1 (where the smile multiplier is 1.0) and define their own path.
+const SMILE_APPLICABLE_STRATEGIES = ['none', 'forgo_inflation'];
+function refreshSmileUi() {
+  const note = document.getElementById('smile-note');
+  if (!note) return;
+  if (!INPUT_STATE.spending_smile) { note.hidden = true; note.innerHTML = ''; return; }
+  let html = 'Spending follows Blanchett&rsquo;s retirement &ldquo;smile&rdquo; from your Bucket&nbsp;1 amount (the Year-1 baseline): roughly flat early, easing through the 70s and 80s, then ticking up in later years for healthcare. Future buckets below fill with the curve&rsquo;s average spending for each period, in today&rsquo;s dollars.';
+  if (!SMILE_APPLICABLE_STRATEGIES.includes(INPUT_STATE.distribution_strategy)) {
+    html += ' <strong>Heads up:</strong> your selected withdrawal strategy sets its own spending path, so the Smile only changes results under <em>None — Use Expense Schedule</em> or <em>Forgo Inflation</em>.';
+  }
+  note.innerHTML = html;
+  note.hidden = false;
 }
 
 function refreshSorUi() {
@@ -4946,11 +5051,12 @@ function refreshNetDraw() {
 
   const age = INPUT_STATE.current_age + 1; // year 1 (Spouse A)
   const ageB = INPUT_STATE.spouse_b_age + 1; // year 1 (Spouse B)
+  const couple = INPUT_STATE.household === 'couple';
   let income = 0;
   if (INPUT_STATE.ss.amount        > 0 && age  >= INPUT_STATE.ss.start_age)        income += INPUT_STATE.ss.amount;
   if (INPUT_STATE.pension.amount   > 0 && age  >= INPUT_STATE.pension.start_age)   income += INPUT_STATE.pension.amount;
-  if (INPUT_STATE.ss_b.amount      > 0 && ageB >= INPUT_STATE.ss_b.start_age)      income += INPUT_STATE.ss_b.amount;
-  if (INPUT_STATE.pension_b.amount > 0 && ageB >= INPUT_STATE.pension_b.start_age) income += INPUT_STATE.pension_b.amount;
+  if (couple && INPUT_STATE.ss_b.amount      > 0 && ageB >= INPUT_STATE.ss_b.start_age)      income += INPUT_STATE.ss_b.amount;
+  if (couple && INPUT_STATE.pension_b.amount > 0 && ageB >= INPUT_STATE.pension_b.start_age) income += INPUT_STATE.pension_b.amount;
   if (INPUT_STATE.annuity.amount > 0 && age >= INPUT_STATE.annuity.start_age &&
       (INPUT_STATE.annuity.stop_age == null || age <= INPUT_STATE.annuity.stop_age)) income += INPUT_STATE.annuity.amount;
 
@@ -5383,8 +5489,10 @@ function buildExportRow(results, userLabel) {
     annuity_amount:               inp.annuity?.amount || 0,
     annuity_start_age:            inp.annuity?.start_age ?? null,
     annuity_stop_age:             inp.annuity?.stop_age ?? null,  // null = lifetime
+    annuity_increase_pct:         inp.annuity?.increase_pct || 0, // fixed annual step-up (0 = level)
     sor_active:                   !!inp.sequence_of_returns,
     sor_force_2008:               !!inp.sor_force_2008,
+    spending_smile:               !!inp.spending_smile,
     allocation_summary:           getAllocationSummary(),
   };
 }
@@ -5548,7 +5656,8 @@ function downloadPDF() {
         const annWindow = inp.annuity.stop_age != null
           ? ` (age ${inp.annuity.start_age}–${inp.annuity.stop_age})`
           : '';
-        incomeRow.push(`Annuity ${fmtMoney(inp.annuity.amount)}${annWindow}`);
+        const annInc = inp.annuity.increase_pct > 0 ? ` +${inp.annuity.increase_pct}%/yr` : '';
+        incomeRow.push(`Annuity ${fmtMoney(inp.annuity.amount)}${annWindow}${annInc}`);
       }
       const incomeStr = incomeRow.length ? incomeRow.join(' / ') : 'None';
       const sorStr = inp.sequence_of_returns
@@ -5881,7 +5990,8 @@ function handleStrategyChange() {
   // If the info modal is open, refresh its content for the new strategy
   const modal = document.getElementById('strategy-info-modal');
   if (modal && !modal.hidden) buildModalContent(strategy);
-  refreshRunButtonState();
+  // Full derived refresh so the smile caution + rail step summaries track the strategy.
+  refreshAllDerived();
 }
 
 function updateActualSpendingPreview() {
@@ -6108,6 +6218,13 @@ function runSimulationFromInputs() {
     .filter((a) => a.key && a.pct > 0)
     .map((a) => ({ key: a.key, pct: a.pct }));
 
+  // When modeling a single person, Spouse B streams are excluded from the run —
+  // send zeroed copies so the engine ignores them. The values stay in
+  // INPUT_STATE so switching back to "couple" restores what the user entered.
+  const couple = INPUT_STATE.household === 'couple';
+  const ss_b      = couple ? { ...INPUT_STATE.ss_b }      : { ...INPUT_STATE.ss_b, amount: 0 };
+  const pension_b = couple ? { ...INPUT_STATE.pension_b } : { ...INPUT_STATE.pension_b, amount: 0 };
+
   const inputs = {
     n_simulations:        INPUT_STATE.n_simulations,
     period_years:         INPUT_STATE.period_years,
@@ -6119,13 +6236,14 @@ function runSimulationFromInputs() {
     sequence_of_returns:  INPUT_STATE.sequence_of_returns,
     sor_force_2008:       INPUT_STATE.sor_force_2008,
     inflation_adjust:     INPUT_STATE.inflation_adjust,
+    spending_smile:       INPUT_STATE.spending_smile,
     expense_mode:         'annual', // we always store annualized expenses
     spouse_b_age:         INPUT_STATE.spouse_b_age,
     allocations,
     ss:        { ...INPUT_STATE.ss },
     pension:   { ...INPUT_STATE.pension },
-    ss_b:      { ...INPUT_STATE.ss_b },
-    pension_b: { ...INPUT_STATE.pension_b },
+    ss_b,
+    pension_b,
     annuity:   { ...INPUT_STATE.annuity },
     buckets: INPUT_STATE.buckets.map((b) => ({ expense: b.expense || 0 })),
     // Distribution Strategy (v1.1 + v1.2)
@@ -6137,6 +6255,7 @@ function runSimulationFromInputs() {
   WORKER.busy = true;
   WORKER.startedAt = performance.now();
   setRunButtonBusy(true);
+  if (window.WIZARD) WIZARD.showResults();   // swap the stage from steps to results
   hideElement('dev-error');
   hideElement('dev-results');
   hideElement('results-placeholder');
@@ -6152,6 +6271,7 @@ function runSimulationFromInputs() {
 function resetToDefaults() {
   if (!confirm('Are you sure you want to reset all inputs?')) return;
   // Reset INPUT_STATE
+  INPUT_STATE.household          = DEFAULTS.household;
   INPUT_STATE.current_age        = DEFAULTS.current_age;
   INPUT_STATE.spouse_b_age       = DEFAULTS.spouse_b_age;
   INPUT_STATE.period_years       = DEFAULTS.period_years;
@@ -6163,6 +6283,7 @@ function resetToDefaults() {
   INPUT_STATE.sor_force_2008     = DEFAULTS.sor_force_2008;
   INPUT_STATE.inflation_adjust   = DEFAULTS.inflation_adjust;
   INPUT_STATE.expense_mode       = DEFAULTS.expense_mode;
+  INPUT_STATE.spending_smile     = DEFAULTS.spending_smile;
   INPUT_STATE.expenses_uniform   = true;
   INPUT_STATE.initial_balance    = DEFAULTS.initial_balance;
   INPUT_STATE.allocations        = DEFAULTS.allocations.map((a) => ({ ...a }));
@@ -6184,13 +6305,181 @@ function resetToDefaults() {
   renderAllocationRows();
   renderBuckets();
   syncSimpleInputsFromState();
+  syncHouseholdUi();            // reflect household choice + Spouse B visibility
   // Reset toggle-driven warnings
   const inflW = document.getElementById('inflation-warning');  if (inflW) inflW.hidden = true;
   refreshAllDerived();
+  if (window.WIZARD) WIZARD.goto(0);   // return to the first step
 }
 
 // Expose for tests
 window.__INPUT_STATE__ = INPUT_STATE;
+
+/* ============================================================
+   Input Wizard — persistent rail nav + step stage
+   Presentation layer over INPUT_STATE. Rail steps are free jumps
+   (never gated); step validity only drives affordances + the Run
+   button. Engine/validation pipeline is untouched.
+   ============================================================ */
+
+// Reflect the single/couple choice into the toggle + Spouse B visibility.
+function syncHouseholdUi() {
+  const couple = INPUT_STATE.household === 'couple';
+  document.querySelectorAll('.household-opt[data-household]').forEach((btn) => {
+    const on = btn.dataset.household === INPUT_STATE.household;
+    btn.classList.toggle('is-active', on);
+    btn.setAttribute('aria-checked', on ? 'true' : 'false');
+  });
+  document.querySelectorAll('.spouse-b-only').forEach((el) => { el.hidden = !couple; });
+}
+
+const WIZ_STRATEGY_LABELS = {
+  none:            'Expense schedule',
+  constant_dollar: 'Constant dollar (4%)',
+  forgo_inflation: 'Forgo inflation',
+  actual_spending: 'Spending decline',
+  guyton_klinger:  'Guyton-Klinger guardrails',
+  vanguard_dynamic:'Vanguard dynamic',
+};
+
+function wizIncomeSummary() {
+  const couple = INPUT_STATE.household === 'couple';
+  let total = (INPUT_STATE.ss.amount || 0) + (INPUT_STATE.pension.amount || 0) + (INPUT_STATE.annuity.amount || 0);
+  if (couple) total += (INPUT_STATE.ss_b.amount || 0) + (INPUT_STATE.pension_b.amount || 0);
+  return total > 0 ? `${formatCurrency(total)} / yr` : 'None';
+}
+
+function wizAllocationSummary() {
+  if (!STATE.data) return '';
+  let stock = 0, bond = 0, alt = 0;
+  for (const a of INPUT_STATE.allocations) {
+    if (!a.key || !(a.pct > 0)) continue;
+    const g = (STATE.data.assets[a.key] || {}).group;
+    if (OPT_EQUITY_GROUPS.includes(g)) stock += a.pct;
+    else if (g === OPT_FI_GROUP)        bond  += a.pct;
+    else                                 alt   += a.pct;
+  }
+  if (stock + bond + alt === 0) return 'Not set';
+  let s = `${Math.round(stock)} / ${Math.round(bond)}`;
+  if (alt > 0) s += ` · ${Math.round(alt)}% alt`;
+  return s;
+}
+
+function wizAssumptionsSummary() {
+  const runs = (INPUT_STATE.n_simulations || 0).toLocaleString('en-US');
+  const periodLabels = {
+    native:  'Full data 1871–2025',
+    postwar: 'Post-WWII 1946–2025',
+    modern:  'Modern era 1972–2025',
+    custom:  `Custom ${INPUT_STATE.custom_start}–${INPUT_STATE.custom_end}`,
+  };
+  let s = `${runs} runs · ${periodLabels[INPUT_STATE.historical_period] || ''}`;
+  if (INPUT_STATE.sequence_of_returns) s += ' · worst year first';
+  return s;
+}
+
+const WIZARD = {
+  hasRun: false,
+  current: '0',
+  steps: [
+    { id: 0,
+      summary: () => {
+        const who = INPUT_STATE.household === 'couple'
+          ? `Couple · ${INPUT_STATE.current_age} / ${INPUT_STATE.spouse_b_age}`
+          : `Just you · age ${INPUT_STATE.current_age}`;
+        return `${who} · ${INPUT_STATE.period_years} yrs`;
+      },
+      valid: () => true },
+    { id: 1,
+      summary: () => formatCurrency(INPUT_STATE.initial_balance),
+      valid: () => INPUT_STATE.initial_balance >= 1000 && INPUT_STATE.initial_balance <= 99_999_999 },
+    { id: 2,
+      summary: () => {
+        const e = INPUT_STATE.buckets[0]?.expense || 0;
+        if (!(e > 0)) return 'Not set';
+        return `${formatCurrency(e)} / yr${INPUT_STATE.spending_smile ? ' · Smile' : ''}`;
+      },
+      valid: () => (INPUT_STATE.buckets[0]?.expense || 0) > 0 },
+    { id: 3,
+      summary: () => wizIncomeSummary(),
+      valid: () => true },
+    { id: 4,
+      summary: () => wizAllocationSummary(),
+      valid: () => {
+        const total = INPUT_STATE.allocations.reduce((s, a) => s + (a.pct || 0), 0);
+        return INPUT_STATE.allocations.some((a) => !!a.key) && total === 100;
+      } },
+    { id: 5,
+      summary: () => WIZ_STRATEGY_LABELS[INPUT_STATE.distribution_strategy] || 'Expense schedule',
+      valid: () => true },
+  ],
+
+  init() {
+    // Rail step nav + assumptions drawer button — free jumps to any step.
+    document.querySelectorAll('.wiz-step-nav[data-step], .wiz-assump-btn[data-step]').forEach((btn) => {
+      btn.addEventListener('click', () => this.goto(btn.dataset.step));
+    });
+    // Back / Continue / drawer-done buttons carry an explicit target.
+    document.querySelectorAll('.wiz-next[data-goto], .wiz-back[data-goto], .wiz-drawer-done[data-goto]').forEach((btn) => {
+      btn.addEventListener('click', () => this.goto(btn.dataset.goto));
+    });
+    // Footer "Run" buttons share the sticky run path.
+    document.querySelectorAll('.wiz-run').forEach((btn) => {
+      btn.addEventListener('click', runSimulationFromInputs);
+    });
+    // Single / couple selector.
+    document.querySelectorAll('.household-opt[data-household]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        INPUT_STATE.household = btn.dataset.household;
+        syncHouseholdUi();
+        refreshAllDerived();
+      });
+    });
+    syncHouseholdUi();
+    this.goto(0);
+    this.refresh();
+  },
+
+  goto(step) {
+    const key = String(step);
+    this.current = key;
+    document.querySelectorAll('.wiz-step[data-step]').forEach((sec) => {
+      const on = sec.dataset.step === key;
+      sec.hidden = !on;
+      sec.classList.toggle('is-active', on);
+    });
+    document.querySelectorAll('.wiz-step-nav[data-step]').forEach((b) => {
+      b.classList.toggle('is-current', b.dataset.step === key);
+    });
+    document.querySelector('.wiz-assump-btn')?.classList.toggle('is-current', key === 'assumptions');
+    this.showSteps();   // navigating always returns from results to editing
+    document.querySelector('.wiz-steps')?.scrollTo?.(0, 0);
+  },
+
+  refresh() {
+    for (const s of this.steps) {
+      const sumEl = document.getElementById('wiz-sum-' + s.id);
+      if (sumEl) sumEl.textContent = s.summary();
+      const nav = document.querySelector('.wiz-step-nav[data-step="' + s.id + '"]');
+      if (nav) {
+        const ok = s.valid();
+        nav.classList.toggle('is-valid', ok);
+        nav.classList.toggle('is-invalid', !ok);
+      }
+    }
+    const aEl = document.getElementById('wiz-assump-summary');
+    if (aEl) aEl.textContent = wizAssumptionsSummary();
+    if (!WORKER.busy) {
+      const runBtn = document.getElementById('run-sim');
+      if (runBtn) runBtn.textContent = this.hasRun ? 'Re-run Simulation' : 'Run Simulation';
+      document.querySelectorAll('.wiz-run').forEach((b) => { b.textContent = (this.hasRun ? 'Re-run' : 'Run Simulation') + ' →'; });
+    }
+  },
+
+  showResults() { this.hasRun = true; document.getElementById('app-layout')?.classList.add('is-results'); },
+  showSteps()   { document.getElementById('app-layout')?.classList.remove('is-results'); },
+};
+window.WIZARD = WIZARD;
 
 /* -----------------------------------------------------------
    Dev panel — progress + results rendering
