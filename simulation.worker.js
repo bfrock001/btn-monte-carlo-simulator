@@ -74,6 +74,25 @@ function runSimulation(inputs, data) {
   const N = inputs.n_simulations;
   const Y = inputs.period_years;
 
+  // Blanchett "Spending Smile" real-multiplier path (optional). When enabled, real
+  // spending is anchored at the Year-1 baseline (R_1 = 1.0) and each subsequent year
+  // compounds by the annual real spending-change rate from Blanchett's fitted quadratic
+  //   rΔS(age) = 0.00008·age² − 0.0125·age + 0.474589
+  // (Estimating the True Cost of Retirement, HRS data). The rate is applied at the PRIOR
+  // year's age. It is slightly positive in early retirement (spending rises to ~age 65),
+  // declines through the 70s/80s, and turns up again (the healthcare "smile") past ~age 91.
+  // Deterministic across trials, so we build it once here (1-indexed by year t = 1..Y).
+  let smileMultipliers = null;
+  if (inputs.spending_smile) {
+    smileMultipliers = new Array(Y + 1);
+    smileMultipliers[1] = 1.0;
+    for (let t = 2; t <= Y; t++) {
+      const agePrev = inputs.current_age + (t - 2); // A_{t-1}: age during the prior year
+      const rDeltaS = 0.00008 * agePrev * agePrev - 0.0125 * agePrev + 0.474589;
+      smileMultipliers[t] = smileMultipliers[t - 1] * (1 + rDeltaS);
+    }
+  }
+
   // Distribution strategy fields (v1.1 + v1.2 + v1.3).
   // Default to 'none' — the pure bucket-driven expense schedule, which is what
   // v1.0 actually did. Callers that don't supply distribution_strategy get the
@@ -132,6 +151,7 @@ function runSimulation(inputs, data) {
       sorMode,
       sor2008Row,
       Y,
+      smileMultipliers,
       // strategy state
       distributionStrategy,
       minimumWithdrawalAnnual,
@@ -240,6 +260,7 @@ function buildEligibleRows(inputs, data) {
 function runOneSim(ctx) {
   const {
     simIndex, inputs, eligibleRows, sorMode, sor2008Row, Y,
+    smileMultipliers,
     distributionStrategy, minimumWithdrawalAnnual,
     realSpendingDeclinePct, upperGuardrailPct, lowerGuardrailPct, gkUpperAdjustmentPct, gkLowerAdjustmentPct,
     vdsCeilingPct, vdsFloorPct,
@@ -284,8 +305,18 @@ function runOneSim(ctx) {
   let vds_real_withdrawal = 0;
   const vdsEventsForSim = (distributionStrategy === 'vanguard_dynamic') ? [] : null;
 
-  // Helper: get the annual gross expense for year t from the bucket schedule (today's dollars)
+  // Helper: get the annual gross expense for year t from the bucket schedule (today's dollars).
+  // When Blanchett's Spending Smile is active (smileMultipliers supplied), the real spending
+  // path is defined entirely by the Year-1 baseline (Bucket 1 = E0) times the age-based real
+  // multiplier R_t — buckets 2-N are ignored. R_1 = 1.0, so any strategy that only anchors on
+  // year 1 (constant_dollar / actual_spending / G-K / VDS) is left unchanged; the smile shapes
+  // only the per-year bucket paths ('none' and 'forgo_inflation').
   const bucketExpenseForYear = (t) => {
+    if (smileMultipliers) {
+      let e0 = inputs.buckets[0].expense || 0;
+      if (inputs.expense_mode === 'monthly') e0 *= 12;
+      return e0 * (smileMultipliers[t] || 1);
+    }
     const bucketIdx = Math.min(((t - 1) / 5) | 0, inputs.buckets.length - 1);
     let e = inputs.buckets[bucketIdx].expense || 0;
     if (inputs.expense_mode === 'monthly') e *= 12;
@@ -369,7 +400,7 @@ function runOneSim(ctx) {
     const pension   = inputs.pension   || { amount: 0, start_age: 65, cola: false };
     const ssB       = inputs.ss_b      || { amount: 0, start_age: 67 };
     const pensionB  = inputs.pension_b || { amount: 0, start_age: 65, cola: false };
-    const annuity   = inputs.annuity   || { amount: 0, start_age: 65, stop_age: null, cola: false };
+    const annuity   = inputs.annuity   || { amount: 0, start_age: 65, stop_age: null, increase_pct: 0 };
 
     let income = 0;
     // Spouse A — start ages resolve against `age`.
@@ -387,9 +418,14 @@ function runOneSim(ctx) {
       income += pensionB.cola ? pensionB.amount * inflationIndex : pensionB.amount;
     }
     // Annuity pays from start_age through stop_age inclusive (stop_age null = for life).
+    // Unlike SS (true inflation COLA), income annuities are not inflation-linked;
+    // some offer an optional FIXED annual step-up (typically 1–5%). increase_pct is
+    // that fixed compound rate, applied from the first payment year onward. 0 = level.
     if (annuity.amount > 0 && age >= annuity.start_age &&
         (annuity.stop_age == null || age <= annuity.stop_age)) {
-      income += annuity.cola ? annuity.amount * inflationIndex : annuity.amount;
+      const annRate = (annuity.increase_pct || 0) / 100;
+      const yearsPaying = age - annuity.start_age;          // 0 in the first payment year
+      income += annuity.amount * Math.pow(1 + annRate, yearsPaying);
     }
 
     // 3. Strategy-aware gross expense / withdrawal target.

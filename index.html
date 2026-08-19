@@ -70,477 +70,619 @@
     <!-- ============================================================
          Three-panel layout: input column (left) + results (right)
          ============================================================ -->
-    <div id="app-layout" class="layout">
+    <div id="app-layout" class="layout layout--wiz">
 
-      <!-- =============== LEFT: INPUT PANEL =============== -->
-      <aside class="input-panel" aria-label="Simulation inputs">
-
-        <!-- Quick-access reset bar -->
-        <div class="input-panel__toolbar">
-          <button type="button" id="reset-defaults-top" class="btn-reset" title="Restore all inputs to default values">
-            <span class="btn-reset__icon" aria-hidden="true">↺</span> Reset all inputs
-          </button>
+      <!-- =============== LEFT: PLAN RAIL (persistent nav) =============== -->
+      <aside class="wiz-rail" aria-label="Your plan">
+        <div class="wiz-rail__head">
+          <span class="wiz-rail__eyebrow">Your plan</span>
         </div>
 
-        <!-- ----- Section: Your Portfolio ----- -->
-        <section class="input-section">
-          <h2 class="section-title">Your Portfolio</h2>
+        <ol class="wiz-rail__steps" id="wiz-rail-steps">
+          <li>
+            <button type="button" class="wiz-step-nav" data-step="0">
+              <span class="wiz-step-nav__badge" aria-hidden="true">1</span>
+              <span class="wiz-step-nav__text">
+                <span class="wiz-step-nav__label">You &amp; your household</span>
+                <span class="wiz-step-nav__summary" id="wiz-sum-0"></span>
+              </span>
+            </button>
+          </li>
+          <li>
+            <button type="button" class="wiz-step-nav" data-step="1">
+              <span class="wiz-step-nav__badge" aria-hidden="true">2</span>
+              <span class="wiz-step-nav__text">
+                <span class="wiz-step-nav__label">The money</span>
+                <span class="wiz-step-nav__summary" id="wiz-sum-1"></span>
+              </span>
+            </button>
+          </li>
+          <li>
+            <button type="button" class="wiz-step-nav" data-step="2">
+              <span class="wiz-step-nav__badge" aria-hidden="true">3</span>
+              <span class="wiz-step-nav__text">
+                <span class="wiz-step-nav__label">What you&rsquo;ll spend</span>
+                <span class="wiz-step-nav__summary" id="wiz-sum-2"></span>
+              </span>
+            </button>
+          </li>
+          <li>
+            <button type="button" class="wiz-step-nav" data-step="3">
+              <span class="wiz-step-nav__badge" aria-hidden="true">4</span>
+              <span class="wiz-step-nav__text">
+                <span class="wiz-step-nav__label">What comes in</span>
+                <span class="wiz-step-nav__summary" id="wiz-sum-3"></span>
+              </span>
+            </button>
+          </li>
+          <li>
+            <button type="button" class="wiz-step-nav" data-step="4">
+              <span class="wiz-step-nav__badge" aria-hidden="true">5</span>
+              <span class="wiz-step-nav__text">
+                <span class="wiz-step-nav__label">How it&rsquo;s invested</span>
+                <span class="wiz-step-nav__summary" id="wiz-sum-4"></span>
+              </span>
+            </button>
+          </li>
+          <li>
+            <button type="button" class="wiz-step-nav" data-step="5">
+              <span class="wiz-step-nav__badge" aria-hidden="true">6</span>
+              <span class="wiz-step-nav__text">
+                <span class="wiz-step-nav__label">How you&rsquo;ll adjust <span class="wiz-step-nav__opt">&amp; assumptions</span></span>
+                <span class="wiz-step-nav__summary" id="wiz-sum-5"></span>
+              </span>
+            </button>
+          </li>
+        </ol>
 
-          <div class="field">
-            <label class="field-label">Asset Allocation</label>
-            <table class="alloc-table" aria-describedby="alloc-total">
-              <thead>
-                <tr>
-                  <th>Asset Class</th>
-                  <th class="num">%</th>
-                  <th aria-label="Remove"></th>
-                </tr>
-              </thead>
-              <tbody id="alloc-rows"></tbody>
-            </table>
-            <div class="alloc-controls">
-              <button type="button" class="btn-link" id="add-alloc">+ Add Asset Class</button>
-              <div id="alloc-total" class="alloc-total" aria-live="polite"></div>
-            </div>
-            <p id="alloc-error" class="field-error" hidden>Allocations must sum to 100%.</p>
+        <div class="wiz-rail__assumptions">
+          <span class="wiz-rail__eyebrow">Market assumptions</span>
+          <p class="wiz-assump-summary" id="wiz-assump-summary"></p>
+          <button type="button" class="btn-text wiz-assump-btn" data-step="5">Change assumptions &rarr;</button>
+        </div>
+
+        <div class="wiz-rail__foot">
+          <button type="button" id="run-sim" class="btn-primary btn-block" disabled>Run Simulation</button>
+          <p id="run-status" class="run-status" aria-live="polite"></p>
+          <div class="wiz-rail__foot-links">
+            <button type="button" id="reset-defaults" class="btn-text">Reset to defaults</button>
+            <span class="wiz-rail__dot" aria-hidden="true">&middot;</span>
+            <a href="#" id="open-terms-link" class="btn-text">Terms of Use</a>
           </div>
+        </div>
+      </aside>
 
-          <div class="field">
-            <label class="field-label" for="initial-balance">Starting Portfolio Balance</label>
-            <input
-              type="text"
-              id="initial-balance"
-              class="currency-input"
-              inputmode="numeric"
-              autocomplete="off"
-              value="$1,000,000"
-            />
-            <p class="field-note">Total investable portfolio value at retirement start. ($1,000 minimum.)</p>
-            <p id="balance-error" class="field-error" hidden></p>
-          </div>
-        </section>
+      <!-- =============== CENTER: STEP STAGE =============== -->
+      <div class="wiz-steps" id="wiz-steps">
 
-        <!-- ----- Section: Simulation Settings ----- -->
-        <section class="input-section">
-          <h2 class="section-title">Simulation Settings</h2>
-
-          <div class="field-row">
+        <!-- ----- Step 0: You & your household ----- -->
+        <section class="wiz-step is-active" data-step="0" id="wiz-step-0" role="group" aria-labelledby="wiz-step-0-title">
+          <header class="wiz-step__head">
+            <span class="wiz-step__eyebrow">Step 1 of 6</span>
+            <h2 class="wiz-step__title" id="wiz-step-0-title">Who are we planning for?</h2>
+            <p class="wiz-step__lede">Tell us who&rsquo;s in the plan and how long to model. You can change any of this later &mdash; every step is one click away in the rail.</p>
+          </header>
+          <div class="wiz-step__body">
             <div class="field">
-              <label class="field-label" for="current-age">Your Current Age</label>
-              <select id="current-age" class="select"></select>
+              <label class="field-label">This plan is for&hellip;</label>
+              <div class="household-toggle" role="radiogroup" aria-label="Who are you modeling?">
+                <button type="button" class="household-opt is-active" data-household="single" role="radio" aria-checked="true">Just me</button>
+                <button type="button" class="household-opt" data-household="couple" role="radio" aria-checked="false">A couple</button>
+              </div>
+              <p class="field-note small">A couple adds a second set of Social Security and pension inputs, each with its own claiming age.</p>
             </div>
+
+            <div class="field-row">
+              <div class="field">
+                <label class="field-label" for="current-age">Your Current Age</label>
+                <select id="current-age" class="select"></select>
+              </div>
+              <div class="field spouse-b-only" hidden>
+                <label class="field-label" for="spouse-b-age">Spouse B &mdash; current age</label>
+                <select id="spouse-b-age" class="select"></select>
+              </div>
+            </div>
+            <p class="field-note small spouse-b-only" hidden>Spouse B&rsquo;s Social Security and pension start relative to <em>this</em> age.</p>
+
             <div class="field">
               <label class="field-label" for="period-years">Simulation Length</label>
               <select id="period-years" class="select"></select>
+              <p class="field-note">How many years of retirement to model. This also sets your 5-year expense buckets in the next step.</p>
             </div>
           </div>
+          <footer class="wiz-step__foot">
+            <span></span>
+            <button type="button" class="btn-primary wiz-next" data-goto="1">Continue &rarr;</button>
+          </footer>
+        </section>
 
-          <div class="field">
-            <label class="field-label" for="n-simulations">Number of Simulations</label>
-            <select id="n-simulations" class="select">
-              <option value="1000">1,000 simulations (faster)</option>
-              <option value="5000">5,000 simulations</option>
-              <option value="10000" selected>10,000 simulations (recommended)</option>
-            </select>
-            <p class="field-note">More simulations = greater accuracy, longer run time.</p>
+        <!-- ----- Step 1: The money ----- -->
+        <section class="wiz-step" data-step="1" id="wiz-step-1" role="group" aria-labelledby="wiz-step-1-title" hidden>
+          <header class="wiz-step__head">
+            <span class="wiz-step__eyebrow">Step 2 of 6</span>
+            <h2 class="wiz-step__title" id="wiz-step-1-title">How much are you starting with?</h2>
+            <p class="wiz-step__lede">Your total investable portfolio value at the start of retirement.</p>
+          </header>
+          <div class="wiz-step__body">
+            <div class="field">
+              <label class="field-label" for="initial-balance">Starting Portfolio Balance</label>
+              <input
+                type="text"
+                id="initial-balance"
+                class="currency-input"
+                inputmode="numeric"
+                autocomplete="off"
+                value="$1,000,000"
+              />
+              <p class="field-note">Total investable portfolio value at retirement start. ($1,000 minimum.)</p>
+              <p id="balance-error" class="field-error" hidden></p>
+            </div>
           </div>
+          <footer class="wiz-step__foot">
+            <button type="button" class="btn-ghost wiz-back" data-goto="0">&larr; Back</button>
+            <button type="button" class="btn-primary wiz-next" data-goto="2">Continue &rarr;</button>
+          </footer>
+        </section>
 
-          <div class="field">
-            <label class="field-label" for="historical-period">Historical Return Period</label>
-            <select id="historical-period" class="select">
-              <option value="native">Full Data Set — Native data per asset (1871–2025)</option>
-              <option value="postwar">Post-WWII — 1946 to 2025</option>
-              <option value="modern" selected>Modern era — 1972 to 2025 (recommended)</option>
-              <option value="custom">Custom range — Select start and end year</option>
-            </select>
-            <div id="custom-range" class="custom-range" hidden>
+        <!-- ----- Step 2: What you'll spend ----- -->
+        <section class="wiz-step" data-step="2" id="wiz-step-2" role="group" aria-labelledby="wiz-step-2-title" hidden>
+          <header class="wiz-step__head">
+            <span class="wiz-step__eyebrow">Step 3 of 6</span>
+            <h2 class="wiz-step__title" id="wiz-step-2-title">What will you spend?</h2>
+            <p class="wiz-step__lede">Enter spending in today&rsquo;s dollars &mdash; the model inflation-adjusts it for you.</p>
+          </header>
+          <div class="wiz-step__body">
+            <div class="tax-notice" role="note">
+              <strong>TAX NOTICE</strong>
+              <p>All returns in this simulation are pre-tax. Your actual after-tax performance will depend on your individual tax situation, account types (IRA, 401k, taxable), and applicable tax rates. Account for income taxes &mdash; including potential RMDs and capital gains &mdash; within your expense figures. Consult a qualified tax professional.</p>
+            </div>
+
+            <label class="toggle-row" for="expense-mode">
+              <span class="toggle-text">
+                <span class="toggle-title">Expense Entry Mode</span>
+                <span class="toggle-hint">The model always calculates annually; monthly amounts are multiplied by 12.</span>
+              </span>
+              <span class="toggle toggle--label">
+                <span class="toggle-side toggle-side--left">Annual</span>
+                <input type="checkbox" id="expense-mode" />
+                <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                <span class="toggle-side toggle-side--right">Monthly</span>
+              </span>
+            </label>
+
+            <p class="field-note">Enter expenses in today&rsquo;s dollars. The model will inflation-adjust these amounts annually. All amounts are pre-tax &mdash; account for income taxes within your expense figures.</p>
+
+            <label id="uniform-expense-row" class="toggle-row" for="uniform-expense">
+              <span class="toggle-text">
+                <span class="toggle-title">Use Bucket 1 expense for all buckets</span>
+                <span class="toggle-hint">When on, every 5-year period uses Bucket 1&rsquo;s amount. Turn off to set different expenses per period.</span>
+              </span>
+              <span class="toggle">
+                <input type="checkbox" id="uniform-expense" checked />
+                <span class="toggle-track"><span class="toggle-thumb"></span></span>
+              </span>
+            </label>
+
+            <label class="toggle-row" for="spending-smile">
+              <span class="toggle-text">
+                <span class="toggle-title">Apply Blanchett Spending Smile</span>
+                <span class="toggle-hint">Model real spending that eases with age (the retirement &ldquo;smile&rdquo;) instead of a flat amount for life. Uses your Bucket&nbsp;1 amount as the Year-1 baseline.</span>
+              </span>
+              <span class="toggle">
+                <input type="checkbox" id="spending-smile" />
+                <span class="toggle-track"><span class="toggle-thumb"></span></span>
+              </span>
+            </label>
+            <p id="smile-note" class="field-note field-note--accent" hidden></p>
+
+            <div id="buckets-container" class="buckets-container"></div>
+
+            <div class="info-box">
+              <strong>i</strong>
+              <p>Your portfolio will be rebalanced to your target allocation annually, after each year&rsquo;s withdrawal is taken.</p>
+            </div>
+          </div>
+          <footer class="wiz-step__foot">
+            <button type="button" class="btn-ghost wiz-back" data-goto="1">&larr; Back</button>
+            <button type="button" class="btn-primary wiz-next" data-goto="3">Continue &rarr;</button>
+          </footer>
+        </section>
+
+        <!-- ----- Step 3: What comes in ----- -->
+        <section class="wiz-step" data-step="3" id="wiz-step-3" role="group" aria-labelledby="wiz-step-3-title" hidden>
+          <header class="wiz-step__head">
+            <span class="wiz-step__eyebrow">Step 4 of 6</span>
+            <h2 class="wiz-step__title" id="wiz-step-3-title">What comes in besides the portfolio?</h2>
+            <p class="wiz-step__lede">Every dollar here is a dollar you don&rsquo;t withdraw. Amounts in today&rsquo;s dollars &mdash; we inflate them for you. Skip anything you don&rsquo;t have.</p>
+          </header>
+          <div class="wiz-step__body">
+            <!-- Social Security -->
+            <div class="income-card">
+              <h3 class="income-title">Social Security</h3>
+              <div class="income-spouse-label small spouse-a-label">You / Spouse A</div>
               <div class="field-row">
                 <div class="field">
-                  <label class="field-label small" for="custom-start">Start year</label>
-                  <select id="custom-start" class="select"></select>
+                  <label class="field-label small" for="ss-amount">Annual Amount</label>
+                  <input type="text" id="ss-amount" class="currency-input" inputmode="numeric" autocomplete="off" value="$0" />
                 </div>
                 <div class="field">
-                  <label class="field-label small" for="custom-end">End year</label>
-                  <select id="custom-end" class="select"></select>
+                  <label class="field-label small" for="ss-start-age">Start Age</label>
+                  <select id="ss-start-age" class="select"></select>
                 </div>
               </div>
-              <p id="custom-range-error" class="field-error" hidden>End year must be at least 5 years after start year.</p>
+              <div class="spouse-b-only" hidden>
+                <div class="income-spouse-label small">Spouse B</div>
+                <div class="field-row">
+                  <div class="field">
+                    <label class="field-label small" for="ss-b-amount">Annual Amount</label>
+                    <input type="text" id="ss-b-amount" class="currency-input" inputmode="numeric" autocomplete="off" value="$0" />
+                  </div>
+                  <div class="field">
+                    <label class="field-label small" for="ss-b-start-age">Start Age</label>
+                    <select id="ss-b-start-age" class="select"></select>
+                  </div>
+                </div>
+              </div>
+              <p class="field-note small">SS always receives an annual COLA equal to the bootstrap year&rsquo;s inflation. Each spouse&rsquo;s Start Age is their own claiming age.</p>
             </div>
-            <div id="constraining-warning" class="field-warning" hidden></div>
+
+            <!-- Pension -->
+            <div class="income-card">
+              <h3 class="income-title">Pension</h3>
+              <div class="income-spouse-label small spouse-a-label">You / Spouse A</div>
+              <div class="field-row">
+                <div class="field">
+                  <label class="field-label small" for="pension-amount">Annual Amount</label>
+                  <input type="text" id="pension-amount" class="currency-input" inputmode="numeric" autocomplete="off" value="$0" />
+                </div>
+                <div class="field">
+                  <label class="field-label small" for="pension-start-age">Start Age</label>
+                  <select id="pension-start-age" class="select"></select>
+                </div>
+              </div>
+              <label class="toggle-row" for="pension-cola">
+                <span class="toggle-text">
+                  <span class="toggle-title small">Spouse A pension COLA?</span>
+                  <span class="toggle-hint">If on, pension is inflated annually like Social Security.</span>
+                </span>
+                <span class="toggle">
+                  <input type="checkbox" id="pension-cola" />
+                  <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                </span>
+              </label>
+              <div class="spouse-b-only" hidden>
+                <div class="income-spouse-label small">Spouse B</div>
+                <div class="field-row">
+                  <div class="field">
+                    <label class="field-label small" for="pension-b-amount">Annual Amount</label>
+                    <input type="text" id="pension-b-amount" class="currency-input" inputmode="numeric" autocomplete="off" value="$0" />
+                  </div>
+                  <div class="field">
+                    <label class="field-label small" for="pension-b-start-age">Start Age</label>
+                    <select id="pension-b-start-age" class="select"></select>
+                  </div>
+                </div>
+                <label class="toggle-row" for="pension-b-cola">
+                  <span class="toggle-text">
+                    <span class="toggle-title small">Spouse B pension COLA?</span>
+                    <span class="toggle-hint">If on, Spouse B&rsquo;s pension is inflated annually.</span>
+                  </span>
+                  <span class="toggle">
+                    <input type="checkbox" id="pension-b-cola" />
+                    <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                  </span>
+                </label>
+              </div>
+            </div>
+
+            <!-- Annuity -->
+            <div class="income-card">
+              <h3 class="income-title">Annuity</h3>
+              <div class="field-row">
+                <div class="field">
+                  <label class="field-label small" for="annuity-amount">Annual Amount</label>
+                  <input type="text" id="annuity-amount" class="currency-input" inputmode="numeric" autocomplete="off" value="$0" />
+                </div>
+                <div class="field">
+                  <label class="field-label small" for="annuity-start-age">Start Age</label>
+                  <select id="annuity-start-age" class="select"></select>
+                </div>
+                <div class="field">
+                  <label class="field-label small" for="annuity-stop-age">Stop Age</label>
+                  <select id="annuity-stop-age" class="select"></select>
+                </div>
+              </div>
+              <p class="field-note small">Stop Age is the last age the annuity pays &mdash; leave at &ldquo;Lifetime&rdquo; for a lifetime annuity, or set it to bridge income until Social Security starts.</p>
+              <div class="field">
+                <label class="field-label small" for="annuity-increase">Annual payment increase</label>
+                <div class="suffix-wrap">
+                  <input type="number" id="annuity-increase" class="num-input" min="0" max="5" step="0.5" value="0" />
+                  <span class="suffix">% / year</span>
+                </div>
+                <p class="field-note small">Income annuities usually aren&rsquo;t inflation-linked, but many offer a fixed annual step-up &mdash; typically <strong>1&ndash;5%</strong>. Enter the increase your contract provides, or leave at 0% for a level payment.</p>
+              </div>
+            </div>
+
+            <div class="net-draw" id="net-draw">
+              <div class="net-draw__label">Est. Net Portfolio Draw — Year 1 (today&rsquo;s $)</div>
+              <div class="net-draw__value" id="net-draw-value">—</div>
+              <p class="net-draw__hint" id="net-draw-hint"></p>
+            </div>
           </div>
-
-          <label class="toggle-row" for="sor-toggle">
-            <span class="toggle-text">
-              <span class="toggle-title">Sequence of Returns Stress Test</span>
-              <span class="toggle-hint">Always simulate the worst year first — the year with the lowest weighted return for your selected portfolio is injected into Year 1 of every simulation.</span>
-            </span>
-            <span class="toggle">
-              <input type="checkbox" id="sor-toggle" />
-              <span class="toggle-track"><span class="toggle-thumb"></span></span>
-            </span>
-          </label>
-
-          <div id="sor-sub" class="sor-sub" hidden>
-            <label class="toggle-row toggle-row--sub" for="sor-force-2008">
-              <span class="toggle-text">
-                <span class="toggle-title small">Force worst year to be 2008</span>
-                <span class="toggle-hint">When on, Year 1 uses 2008&rsquo;s actual returns specifically (even if 2008 is outside your selected historical period).</span>
-              </span>
-              <span class="toggle">
-                <input type="checkbox" id="sor-force-2008" />
-                <span class="toggle-track"><span class="toggle-thumb"></span></span>
-              </span>
-            </label>
-            <p id="sor-note" class="field-note field-note--accent"></p>
-          </div>
-
-          <label class="toggle-row" for="inflation-toggle">
-            <span class="toggle-text">
-              <span class="toggle-title">Inflation-Adjust Expenses</span>
-              <span class="toggle-hint">Expenses are entered in today&rsquo;s dollars and inflated annually.</span>
-            </span>
-            <span class="toggle">
-              <input type="checkbox" id="inflation-toggle" checked />
-              <span class="toggle-track"><span class="toggle-thumb"></span></span>
-            </span>
-          </label>
-          <p id="inflation-warning" class="field-warning" hidden>
-            Turning off inflation adjustment means your real purchasing power will decline over time. This is not recommended for most users.
-          </p>
+          <footer class="wiz-step__foot">
+            <button type="button" class="btn-ghost wiz-back" data-goto="2">&larr; Back</button>
+            <button type="button" class="btn-primary wiz-next" data-goto="4">Continue &rarr;</button>
+          </footer>
         </section>
 
-        <!-- ----- Section: Distribution Strategy ----- -->
-        <section class="input-section">
-          <h2 class="section-title">Distribution Strategy</h2>
-          <p class="field-note">
-            Select how your annual portfolio withdrawal is calculated each year.
-            Constant Dollar treats your expense inputs as fixed real withdrawals.
-            Guardrail strategies dynamically adjust spending based on market performance.
-          </p>
-
-          <div class="field">
-            <label class="field-label" for="distribution-strategy">
-              Withdrawal Strategy
-              <button type="button" id="strategy-info-btn" class="info-icon-btn" aria-label="Learn about this withdrawal strategy">i</button>
-            </label>
-            <select id="distribution-strategy" class="select">
-              <option value="none" selected>None — Use Expense Schedule</option>
-              <option value="constant_dollar">Constant Dollar (Bengen 4% rule)</option>
-              <option value="forgo_inflation">Forgo Inflation Adjustment (T. Rowe Price)</option>
-              <option value="actual_spending">Actual Spending Decline (EBRI / Blanchett)</option>
-              <option value="guyton_klinger">Guyton-Klinger Guardrails</option>
-              <option value="vanguard_dynamic">Vanguard Dynamic Spending</option>
-            </select>
-            <p id="strategy-description" class="field-note"></p>
-          </div>
-
-          <div class="field">
-            <label class="field-label" for="minimum-withdrawal">Minimum Annual Withdrawal</label>
-            <input type="text" id="minimum-withdrawal" class="currency-input" inputmode="numeric" autocomplete="off" placeholder="$0 (no floor)" value="" />
-            <p class="field-note">
-              Optional. If your distribution strategy calculates a withdrawal below this amount, this floor will be used instead. Represents your non-negotiable baseline spending in today&rsquo;s dollars &mdash; <strong>the floor amount grows with inflation each year</strong>, so a $40,000 floor at retirement preserves today&rsquo;s $40,000 of purchasing power. Leave blank or $0 for no floor.
-            </p>
-            <p class="field-warning" id="minimum-withdrawal-warning" hidden>
-              A high minimum withdrawal relative to your portfolio may accelerate depletion. The simulation will deplete the portfolio rather than violate the minimum floor.
-            </p>
-          </div>
-
-          <!-- Actual Spending parameter panel -->
-          <div id="params-actual-spending" class="strategy-params" hidden>
+        <!-- ----- Step 4: How it's invested ----- -->
+        <section class="wiz-step" data-step="4" id="wiz-step-4" role="group" aria-labelledby="wiz-step-4-title" hidden>
+          <header class="wiz-step__head">
+            <span class="wiz-step__eyebrow">Step 5 of 6</span>
+            <h2 class="wiz-step__title" id="wiz-step-4-title">How is it invested?</h2>
+            <p class="wiz-step__lede">Set your target allocation across asset classes. The portfolio rebalances to this mix each year.</p>
+          </header>
+          <div class="wiz-step__body">
             <div class="field">
-              <label class="field-label" for="real-spending-decline">Annual Real Spending Decline</label>
-              <div class="suffix-wrap">
-                <input type="number" id="real-spending-decline" class="num-input" min="0.5" max="3.0" step="0.1" value="2.0" />
-                <span class="suffix">% per year</span>
+              <label class="field-label">Asset Allocation</label>
+              <table class="alloc-table" aria-describedby="alloc-total">
+                <thead>
+                  <tr>
+                    <th>Asset Class</th>
+                    <th class="num">%</th>
+                    <th aria-label="Remove"></th>
+                  </tr>
+                </thead>
+                <tbody id="alloc-rows"></tbody>
+              </table>
+              <div class="alloc-controls">
+                <button type="button" class="btn-link" id="add-alloc">+ Add Asset Class</button>
+                <div id="alloc-total" class="alloc-total" aria-live="polite"></div>
+              </div>
+              <p id="alloc-error" class="field-error" hidden>Allocations must sum to 100%.</p>
+            </div>
+          </div>
+          <footer class="wiz-step__foot">
+            <button type="button" class="btn-ghost wiz-back" data-goto="3">&larr; Back</button>
+            <button type="button" class="btn-primary wiz-next" data-goto="5">Continue &rarr;</button>
+          </footer>
+        </section>
+
+        <!-- ----- Step 5: How you'll adjust (optional) ----- -->
+        <section class="wiz-step" data-step="5" id="wiz-step-5" role="group" aria-labelledby="wiz-step-5-title" hidden>
+          <header class="wiz-step__head">
+            <span class="wiz-step__eyebrow">Step 6 of 6</span>
+            <h2 class="wiz-step__title" id="wiz-step-5-title">How you&rsquo;ll adjust &amp; how it&rsquo;s modeled</h2>
+            <p class="wiz-step__lede">Pick a withdrawal strategy, then review the market assumptions the model runs on &mdash; simulations, history window, and the sequence-of-returns stress test. Working defaults are loaded throughout, so you can run any time.</p>
+          </header>
+          <div class="wiz-step__body">
+            <div class="field">
+              <label class="field-label" for="distribution-strategy">
+                Withdrawal Strategy
+                <button type="button" id="strategy-info-btn" class="info-icon-btn" aria-label="Learn about this withdrawal strategy">i</button>
+              </label>
+              <select id="distribution-strategy" class="select">
+                <option value="none" selected>None — Use Expense Schedule</option>
+                <option value="constant_dollar">Constant Dollar (Bengen 4% rule)</option>
+                <option value="forgo_inflation">Forgo Inflation Adjustment (T. Rowe Price)</option>
+                <option value="actual_spending">Actual Spending Decline (EBRI / Blanchett)</option>
+                <option value="guyton_klinger">Guyton-Klinger Guardrails</option>
+                <option value="vanguard_dynamic">Vanguard Dynamic Spending</option>
+              </select>
+              <p id="strategy-description" class="field-note"></p>
+            </div>
+
+            <div class="field">
+              <label class="field-label" for="minimum-withdrawal">Minimum Annual Withdrawal</label>
+              <input type="text" id="minimum-withdrawal" class="currency-input" inputmode="numeric" autocomplete="off" placeholder="$0 (no floor)" value="" />
+              <p class="field-note">
+                Optional. If your distribution strategy calculates a withdrawal below this amount, this floor will be used instead. Represents your non-negotiable baseline spending in today&rsquo;s dollars &mdash; <strong>the floor amount grows with inflation each year</strong>, so a $40,000 floor at retirement preserves today&rsquo;s $40,000 of purchasing power. Leave blank or $0 for no floor.
+              </p>
+              <p class="field-warning" id="minimum-withdrawal-warning" hidden>
+                A high minimum withdrawal relative to your portfolio may accelerate depletion. The simulation will deplete the portfolio rather than violate the minimum floor.
+              </p>
+            </div>
+
+            <!-- Actual Spending parameter panel -->
+            <div id="params-actual-spending" class="strategy-params" hidden>
+              <div class="field">
+                <label class="field-label" for="real-spending-decline">Annual Real Spending Decline</label>
+                <div class="suffix-wrap">
+                  <input type="number" id="real-spending-decline" class="num-input" min="0.5" max="3.0" step="0.1" value="2.0" />
+                  <span class="suffix">% per year</span>
+                </div>
+                <p class="field-note">
+                  EBRI research shows retirees naturally reduce real spending ~2% per year. At 2.5% inflation and 2.0% decline, withdrawals grow only 0.5% per year nominally.
+                </p>
+              </div>
+
+              <div class="preview-box" id="actual-spending-preview">
+                <div class="preview-row"><span>Net annual growth</span><span id="preview-net-growth">0.5%</span></div>
+                <div class="preview-row"><span>Year 1 withdrawal</span><span id="preview-as-year1">&mdash;</span></div>
+                <div class="preview-row"><span>Year 10 (nominal / real)</span><span><span id="preview-as-year10-nominal">&mdash;</span> / <span id="preview-as-year10-real">&mdash;</span></span></div>
+                <div class="preview-row"><span>Year 20 (nominal / real)</span><span><span id="preview-as-year20-nominal">&mdash;</span> / <span id="preview-as-year20-real">&mdash;</span></span></div>
+              </div>
+            </div>
+
+            <!-- Guyton-Klinger parameter panel -->
+            <div id="params-guyton-klinger" class="strategy-params" hidden>
+              <div class="field-row">
+                <div class="field">
+                  <label class="field-label small" for="gk-upper-guardrail">Upper Guardrail (cut)</label>
+                  <div class="suffix-wrap">
+                    <input type="number" id="gk-upper-guardrail" class="num-input" min="4.0" max="8.0" step="0.1" value="6.0" />
+                    <span class="suffix">%</span>
+                  </div>
+                </div>
+                <div class="field">
+                  <label class="field-label small" for="gk-lower-guardrail">Lower Guardrail (raise)</label>
+                  <div class="suffix-wrap">
+                    <input type="number" id="gk-lower-guardrail" class="num-input" min="3.0" max="5.5" step="0.1" value="4.0" />
+                    <span class="suffix">%</span>
+                  </div>
+                </div>
+              </div>
+              <p id="gk-upper-error" class="field-error" hidden></p>
+              <p id="gk-lower-error" class="field-error" hidden></p>
+              <p id="gk-gap-error" class="field-error" hidden>Upper guardrail must be at least 1.0% higher than lower guardrail.</p>
+
+              <div class="field-row">
+                <div class="field">
+                  <label class="field-label small" for="gk-upper-adjustment">Upper Adjustment (cut)</label>
+                  <div class="suffix-wrap">
+                    <input type="number" id="gk-upper-adjustment" class="num-input" min="5" max="20" step="1" value="10" />
+                    <span class="suffix">%</span>
+                  </div>
+                </div>
+                <div class="field">
+                  <label class="field-label small" for="gk-lower-adjustment">Lower Adjustment (raise)</label>
+                  <div class="suffix-wrap">
+                    <input type="number" id="gk-lower-adjustment" class="num-input" min="5" max="20" step="1" value="10" />
+                    <span class="suffix">%</span>
+                  </div>
+                </div>
               </div>
               <p class="field-note">
-                EBRI research shows retirees naturally reduce real spending ~2% per year. At 2.5% inflation and 2.0% decline, withdrawals grow only 0.5% per year nominally.
+                Percentage by which spending is cut (upper) or raised (lower) when a guardrail is breached. Original Guyton-Klinger research used 10% for both. Enter 5 to 20.
               </p>
-            </div>
+              <p id="gk-upper-adj-error" class="field-error" hidden></p>
+              <p id="gk-lower-adj-error" class="field-error" hidden></p>
 
-            <div class="preview-box" id="actual-spending-preview">
-              <div class="preview-row"><span>Net annual growth</span><span id="preview-net-growth">0.5%</span></div>
-              <div class="preview-row"><span>Year 1 withdrawal</span><span id="preview-as-year1">&mdash;</span></div>
-              <div class="preview-row"><span>Year 10 (nominal / real)</span><span><span id="preview-as-year10-nominal">&mdash;</span> / <span id="preview-as-year10-real">&mdash;</span></span></div>
-              <div class="preview-row"><span>Year 20 (nominal / real)</span><span><span id="preview-as-year20-nominal">&mdash;</span> / <span id="preview-as-year20-real">&mdash;</span></span></div>
-            </div>
-          </div>
-
-          <!-- Guyton-Klinger parameter panel -->
-          <div id="params-guyton-klinger" class="strategy-params" hidden>
-            <div class="field-row">
-              <div class="field">
-                <label class="field-label small" for="gk-upper-guardrail">Upper Guardrail (cut)</label>
-                <div class="suffix-wrap">
-                  <input type="number" id="gk-upper-guardrail" class="num-input" min="4.0" max="8.0" step="0.1" value="6.0" />
-                  <span class="suffix">%</span>
-                </div>
+              <div class="info-box">
+                <strong>i</strong>
+                <p>
+                  <strong>Two rules apply each year in sequence:</strong><br>
+                  Rule 1 &mdash; Inflation: skip raise if portfolio lost value last year.<br>
+                  Rule 2 &mdash; Guardrail: check (expense &minus; SS &minus; Pension &minus; Annuity) &divide; portfolio. If above upper, cut expense by adjustment %. If below lower, raise. Upper guardrail cut suspended in final 15 years.
+                </p>
               </div>
-              <div class="field">
-                <label class="field-label small" for="gk-lower-guardrail">Lower Guardrail (raise)</label>
-                <div class="suffix-wrap">
-                  <input type="number" id="gk-lower-guardrail" class="num-input" min="3.0" max="5.5" step="0.1" value="4.0" />
-                  <span class="suffix">%</span>
-                </div>
+
+              <div class="preview-box">
+                <div class="preview-row"><span>Year 1 effective rate (net)</span><span id="gk-preview-rate">&mdash;</span></div>
+                <div class="preview-row"><span>Upper fires when portfolio falls to</span><span id="gk-preview-upper-portfolio">&mdash;</span></div>
+                <div class="preview-row"><span>Lower fires when portfolio grows to</span><span id="gk-preview-lower-portfolio">&mdash;</span></div>
               </div>
             </div>
-            <p id="gk-upper-error" class="field-error" hidden></p>
-            <p id="gk-lower-error" class="field-error" hidden></p>
-            <p id="gk-gap-error" class="field-error" hidden>Upper guardrail must be at least 1.0% higher than lower guardrail.</p>
 
-            <div class="field-row">
-              <div class="field">
-                <label class="field-label small" for="gk-upper-adjustment">Upper Adjustment (cut)</label>
-                <div class="suffix-wrap">
-                  <input type="number" id="gk-upper-adjustment" class="num-input" min="5" max="20" step="1" value="10" />
-                  <span class="suffix">%</span>
+            <!-- Vanguard Dynamic Spending parameter panel -->
+            <div id="params-vanguard-dynamic" class="strategy-params" hidden>
+              <div class="field-row">
+                <div class="field">
+                  <label class="field-label small" for="vds-ceiling">Ceiling (max raise)</label>
+                  <div class="suffix-wrap">
+                    <input type="number" id="vds-ceiling" class="num-input" min="1.0" max="15.0" step="0.5" value="5.0" />
+                    <span class="suffix">% / year</span>
+                  </div>
+                </div>
+                <div class="field">
+                  <label class="field-label small" for="vds-floor">Floor (max cut)</label>
+                  <div class="suffix-wrap">
+                    <input type="number" id="vds-floor" class="num-input" min="0.5" max="10.0" step="0.5" value="2.5" />
+                    <span class="suffix">% / year</span>
+                  </div>
                 </div>
               </div>
-              <div class="field">
-                <label class="field-label small" for="gk-lower-adjustment">Lower Adjustment (raise)</label>
-                <div class="suffix-wrap">
-                  <input type="number" id="gk-lower-adjustment" class="num-input" min="5" max="20" step="1" value="10" />
-                  <span class="suffix">%</span>
-                </div>
+              <p id="vds-ceiling-error" class="field-error" hidden></p>
+              <p id="vds-floor-error" class="field-error" hidden></p>
+
+              <div class="info-box">
+                <strong>i</strong>
+                <p>
+                  Each year a tentative withdrawal is computed as <em>current portfolio &times; target rate</em>, where the target rate is implied by Bucket&nbsp;1 &divide; starting balance. The caps are applied in <strong>real (today&rsquo;s $) dollars</strong> &mdash; the ceiling caps year-over-year real raises; the floor caps year-over-year real cuts. The nominal cap automatically scales with inflation.
+                </p>
+              </div>
+
+              <div class="preview-box">
+                <div class="preview-row"><span>Implied target rate</span><span id="vds-preview-rate">&mdash;</span></div>
+                <div class="preview-row"><span>Year 2 ceiling (max real raise)</span><span id="vds-preview-ceiling">&mdash;</span></div>
+                <div class="preview-row"><span>Year 2 floor (max real cut)</span><span id="vds-preview-floor">&mdash;</span></div>
               </div>
             </div>
-            <p class="field-note">
-              Percentage by which spending is cut (upper) or raised (lower) when a guardrail is breached. Original Guyton-Klinger research used 10% for both. Enter 5 to 20.
-            </p>
-            <p id="gk-upper-adj-error" class="field-error" hidden></p>
-            <p id="gk-lower-adj-error" class="field-error" hidden></p>
+            <!-- ----- Market assumptions (moved inline from the drawer) ----- -->
+            <div class="wiz-subsection">
+              <span class="wiz-step__eyebrow wiz-subsection__eyebrow">Market assumptions</span>
+              <p class="field-note">These drive the engine, not your household &mdash; number of simulations, the history window, and the sequence-of-returns stress test. Defaults match the tool&rsquo;s recommended settings; change them only if you know what you&rsquo;re after.</p>
 
-            <div class="info-box">
-              <strong>i</strong>
-              <p>
-                <strong>Two rules apply each year in sequence:</strong><br>
-                Rule 1 &mdash; Inflation: skip raise if portfolio lost value last year.<br>
-                Rule 2 &mdash; Guardrail: check (expense &minus; SS &minus; Pension &minus; Annuity) &divide; portfolio. If above upper, cut expense by adjustment %. If below lower, raise. Upper guardrail cut suspended in final 15 years.
-              </p>
-            </div>
-
-            <div class="preview-box">
-              <div class="preview-row"><span>Year 1 effective rate (net)</span><span id="gk-preview-rate">&mdash;</span></div>
-              <div class="preview-row"><span>Upper fires when portfolio falls to</span><span id="gk-preview-upper-portfolio">&mdash;</span></div>
-              <div class="preview-row"><span>Lower fires when portfolio grows to</span><span id="gk-preview-lower-portfolio">&mdash;</span></div>
-            </div>
-          </div>
-
-          <!-- Vanguard Dynamic Spending parameter panel -->
-          <div id="params-vanguard-dynamic" class="strategy-params" hidden>
-            <div class="field-row">
-              <div class="field">
-                <label class="field-label small" for="vds-ceiling">Ceiling (max raise)</label>
-                <div class="suffix-wrap">
-                  <input type="number" id="vds-ceiling" class="num-input" min="1.0" max="15.0" step="0.5" value="5.0" />
-                  <span class="suffix">% / year</span>
-                </div>
-              </div>
-              <div class="field">
-                <label class="field-label small" for="vds-floor">Floor (max cut)</label>
-                <div class="suffix-wrap">
-                  <input type="number" id="vds-floor" class="num-input" min="0.5" max="10.0" step="0.5" value="2.5" />
-                  <span class="suffix">% / year</span>
-                </div>
-              </div>
-            </div>
-            <p id="vds-ceiling-error" class="field-error" hidden></p>
-            <p id="vds-floor-error" class="field-error" hidden></p>
-
-            <div class="info-box">
-              <strong>i</strong>
-              <p>
-                Each year a tentative withdrawal is computed as <em>current portfolio &times; target rate</em>, where the target rate is implied by Bucket&nbsp;1 &divide; starting balance. The caps are applied in <strong>real (today&rsquo;s $) dollars</strong> &mdash; the ceiling caps year-over-year real raises; the floor caps year-over-year real cuts. The nominal cap automatically scales with inflation.
-              </p>
-            </div>
-
-            <div class="preview-box">
-              <div class="preview-row"><span>Implied target rate</span><span id="vds-preview-rate">&mdash;</span></div>
-              <div class="preview-row"><span>Year 2 ceiling (max real raise)</span><span id="vds-preview-ceiling">&mdash;</span></div>
-              <div class="preview-row"><span>Year 2 floor (max real cut)</span><span id="vds-preview-floor">&mdash;</span></div>
-            </div>
-          </div>
-        </section>
-
-        <!-- ----- Section: Expense Schedule ----- -->
-        <section class="input-section">
-          <h2 class="section-title">Expense Schedule</h2>
-
-          <div class="tax-notice" role="note">
-            <strong>TAX NOTICE</strong>
-            <p>All returns in this simulation are pre-tax. Your actual after-tax performance will depend on your individual tax situation, account types (IRA, 401k, taxable), and applicable tax rates. Account for income taxes &mdash; including potential RMDs and capital gains &mdash; within your expense figures. Consult a qualified tax professional.</p>
-          </div>
-
-          <label class="toggle-row" for="expense-mode">
-            <span class="toggle-text">
-              <span class="toggle-title">Expense Entry Mode</span>
-              <span class="toggle-hint">The model always calculates annually; monthly amounts are multiplied by 12.</span>
-            </span>
-            <span class="toggle toggle--label">
-              <span class="toggle-side toggle-side--left">Annual</span>
-              <input type="checkbox" id="expense-mode" />
-              <span class="toggle-track"><span class="toggle-thumb"></span></span>
-              <span class="toggle-side toggle-side--right">Monthly</span>
-            </span>
-          </label>
-
-          <p class="field-note">Enter expenses in today&rsquo;s dollars. The model will inflation-adjust these amounts annually. All amounts are pre-tax &mdash; account for income taxes within your expense figures.</p>
-
-          <label id="uniform-expense-row" class="toggle-row" for="uniform-expense">
-            <span class="toggle-text">
-              <span class="toggle-title">Use Bucket 1 expense for all buckets</span>
-              <span class="toggle-hint">When on, every 5-year period uses Bucket 1&rsquo;s amount. Turn off to set different expenses per period.</span>
-            </span>
-            <span class="toggle">
-              <input type="checkbox" id="uniform-expense" checked />
-              <span class="toggle-track"><span class="toggle-thumb"></span></span>
-            </span>
-          </label>
-
-          <div id="buckets-container" class="buckets-container"></div>
-
-          <div class="info-box">
-            <strong>i</strong>
-            <p>Your portfolio will be rebalanced to your target allocation annually, after each year&rsquo;s withdrawal is taken.</p>
-          </div>
-        </section>
-
-        <!-- ----- Section: Income Sources (global) ----- -->
-        <section class="input-section">
-          <h2 class="section-title">Income Sources</h2>
-          <p class="field-note">All amounts in today&rsquo;s dollars. Each stream is netted against expenses each year; any surplus is added back to the portfolio.</p>
-
-          <!-- Spouse B age (only relevant for couples) -->
-          <div class="field-row">
             <div class="field">
-              <label class="field-label small" for="spouse-b-age">Spouse B &mdash; current age</label>
-              <select id="spouse-b-age" class="select"></select>
+              <label class="field-label" for="n-simulations">Number of Simulations</label>
+              <select id="n-simulations" class="select">
+                <option value="1000">1,000 simulations (faster)</option>
+                <option value="5000">5,000 simulations</option>
+                <option value="10000" selected>10,000 simulations (recommended)</option>
+              </select>
+              <p class="field-note">More simulations = greater accuracy, longer run time.</p>
             </div>
-          </div>
-          <p class="field-note small">Only used if you enter Spouse B benefits below &mdash; their Social Security and pension start relative to <em>this</em> age. Leave it if you&rsquo;re modeling one person.</p>
 
-          <!-- Social Security -->
-          <div class="income-card">
-            <h3 class="income-title">Social Security</h3>
-            <div class="income-spouse-label small">You / Spouse A</div>
-            <div class="field-row">
-              <div class="field">
-                <label class="field-label small" for="ss-amount">Annual Amount</label>
-                <input type="text" id="ss-amount" class="currency-input" inputmode="numeric" autocomplete="off" value="$0" />
+            <div class="field">
+              <label class="field-label" for="historical-period">Historical Return Period</label>
+              <select id="historical-period" class="select">
+                <option value="native">Full Data Set — Native data per asset (1871–2025)</option>
+                <option value="postwar">Post-WWII — 1946 to 2025</option>
+                <option value="modern" selected>Modern era — 1972 to 2025 (recommended)</option>
+                <option value="custom">Custom range — Select start and end year</option>
+              </select>
+              <div id="custom-range" class="custom-range" hidden>
+                <div class="field-row">
+                  <div class="field">
+                    <label class="field-label small" for="custom-start">Start year</label>
+                    <select id="custom-start" class="select"></select>
+                  </div>
+                  <div class="field">
+                    <label class="field-label small" for="custom-end">End year</label>
+                    <select id="custom-end" class="select"></select>
+                  </div>
+                </div>
+                <p id="custom-range-error" class="field-error" hidden>End year must be at least 5 years after start year.</p>
               </div>
-              <div class="field">
-                <label class="field-label small" for="ss-start-age">Start Age</label>
-                <select id="ss-start-age" class="select"></select>
-              </div>
+              <div id="constraining-warning" class="field-warning" hidden></div>
             </div>
-            <div class="income-spouse-label small">Spouse B <span class="income-spouse-opt">(optional)</span></div>
-            <div class="field-row">
-              <div class="field">
-                <label class="field-label small" for="ss-b-amount">Annual Amount</label>
-                <input type="text" id="ss-b-amount" class="currency-input" inputmode="numeric" autocomplete="off" value="$0" />
-              </div>
-              <div class="field">
-                <label class="field-label small" for="ss-b-start-age">Start Age</label>
-                <select id="ss-b-start-age" class="select"></select>
-              </div>
-            </div>
-            <p class="field-note small">SS always receives an annual COLA equal to the bootstrap year&rsquo;s inflation. Each spouse&rsquo;s Start Age is their own claiming age.</p>
-          </div>
 
-          <!-- Pension -->
-          <div class="income-card">
-            <h3 class="income-title">Pension</h3>
-            <div class="income-spouse-label small">You / Spouse A</div>
-            <div class="field-row">
-              <div class="field">
-                <label class="field-label small" for="pension-amount">Annual Amount</label>
-                <input type="text" id="pension-amount" class="currency-input" inputmode="numeric" autocomplete="off" value="$0" />
-              </div>
-              <div class="field">
-                <label class="field-label small" for="pension-start-age">Start Age</label>
-                <select id="pension-start-age" class="select"></select>
-              </div>
-            </div>
-            <label class="toggle-row" for="pension-cola">
+            <label class="toggle-row" for="sor-toggle">
               <span class="toggle-text">
-                <span class="toggle-title small">Spouse A pension COLA?</span>
-                <span class="toggle-hint">If on, pension is inflated annually like Social Security.</span>
+                <span class="toggle-title">Sequence of Returns Stress Test</span>
+                <span class="toggle-hint">Always simulate the worst year first — the year with the lowest weighted return for your selected portfolio is injected into Year 1 of every simulation.</span>
               </span>
               <span class="toggle">
-                <input type="checkbox" id="pension-cola" />
+                <input type="checkbox" id="sor-toggle" />
                 <span class="toggle-track"><span class="toggle-thumb"></span></span>
               </span>
             </label>
-            <div class="income-spouse-label small">Spouse B <span class="income-spouse-opt">(optional)</span></div>
-            <div class="field-row">
-              <div class="field">
-                <label class="field-label small" for="pension-b-amount">Annual Amount</label>
-                <input type="text" id="pension-b-amount" class="currency-input" inputmode="numeric" autocomplete="off" value="$0" />
-              </div>
-              <div class="field">
-                <label class="field-label small" for="pension-b-start-age">Start Age</label>
-                <select id="pension-b-start-age" class="select"></select>
-              </div>
+
+            <div id="sor-sub" class="sor-sub" hidden>
+              <label class="toggle-row toggle-row--sub" for="sor-force-2008">
+                <span class="toggle-text">
+                  <span class="toggle-title small">Force worst year to be 2008</span>
+                  <span class="toggle-hint">When on, Year 1 uses 2008&rsquo;s actual returns specifically (even if 2008 is outside your selected historical period).</span>
+                </span>
+                <span class="toggle">
+                  <input type="checkbox" id="sor-force-2008" />
+                  <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                </span>
+              </label>
+              <p id="sor-note" class="field-note field-note--accent"></p>
             </div>
-            <label class="toggle-row" for="pension-b-cola">
+
+            <label class="toggle-row" for="inflation-toggle">
               <span class="toggle-text">
-                <span class="toggle-title small">Spouse B pension COLA?</span>
-                <span class="toggle-hint">If on, Spouse B&rsquo;s pension is inflated annually.</span>
+                <span class="toggle-title">Inflation-Adjust Expenses</span>
+                <span class="toggle-hint">Expenses are entered in today&rsquo;s dollars and inflated annually.</span>
               </span>
               <span class="toggle">
-                <input type="checkbox" id="pension-b-cola" />
+                <input type="checkbox" id="inflation-toggle" checked />
                 <span class="toggle-track"><span class="toggle-thumb"></span></span>
               </span>
             </label>
-          </div>
-
-          <!-- Annuity -->
-          <div class="income-card">
-            <h3 class="income-title">Annuity</h3>
-            <div class="field-row">
-              <div class="field">
-                <label class="field-label small" for="annuity-amount">Annual Amount</label>
-                <input type="text" id="annuity-amount" class="currency-input" inputmode="numeric" autocomplete="off" value="$0" />
-              </div>
-              <div class="field">
-                <label class="field-label small" for="annuity-start-age">Start Age</label>
-                <select id="annuity-start-age" class="select"></select>
-              </div>
-              <div class="field">
-                <label class="field-label small" for="annuity-stop-age">Stop Age</label>
-                <select id="annuity-stop-age" class="select"></select>
-              </div>
+            <p id="inflation-warning" class="field-warning" hidden>
+              Turning off inflation adjustment means your real purchasing power will decline over time. This is not recommended for most users.
+            </p>
             </div>
-            <p class="field-note small">Stop Age is the last age the annuity pays &mdash; leave at &ldquo;Lifetime&rdquo; for a lifetime annuity, or set it to bridge income until Social Security starts.</p>
-            <label class="toggle-row" for="annuity-cola">
-              <span class="toggle-text">
-                <span class="toggle-title small">Includes COLA?</span>
-                <span class="toggle-hint">If on, annuity is inflated annually.</span>
-              </span>
-              <span class="toggle">
-                <input type="checkbox" id="annuity-cola" />
-                <span class="toggle-track"><span class="toggle-thumb"></span></span>
-              </span>
-            </label>
           </div>
-
-          <div class="net-draw" id="net-draw">
-            <div class="net-draw__label">Est. Net Portfolio Draw — Year 1 (today&rsquo;s $)</div>
-            <div class="net-draw__value" id="net-draw-value">—</div>
-            <p class="net-draw__hint" id="net-draw-hint"></p>
-          </div>
+          <footer class="wiz-step__foot">
+            <button type="button" class="btn-ghost wiz-back" data-goto="4">&larr; Back</button>
+            <button type="button" class="btn-primary wiz-run">Run Simulation &rarr;</button>
+          </footer>
         </section>
-
-        <!-- ----- Section: Run Simulation ----- -->
-        <section class="input-section input-section--run">
-          <p class="disclaimer-note">See the
-            <a href="#" id="open-terms-link" class="disclaimer__link">Terms of Use</a> for this tool.</p>
-
-          <button type="button" id="run-sim" class="btn-primary btn-block" disabled>Run Simulation</button>
-          <p id="run-status" class="run-status" aria-live="polite"></p>
-          <button type="button" id="reset-defaults" class="btn-text">Reset to Defaults</button>
-        </section>
-      </aside>
+      </div><!-- /wiz-steps -->
 
       <!-- =============== RIGHT: RESULTS PANEL =============== -->
       <div class="results-panel" id="results-panel">
@@ -1215,7 +1357,9 @@
                 their own current age, so their benefits start on <em>their</em> timeline.</li>
               <li><strong>Pension</strong> &mdash; per spouse, with an optional COLA.</li>
               <li><strong>Annuity</strong> &mdash; with a start age and an optional stop age, so you can model an
-                annuity that only bridges income until Social Security begins.</li>
+                annuity that only bridges income until Social Security begins. Income annuities aren&rsquo;t
+                inflation-linked, so instead of a COLA you can set an optional <strong>fixed annual increase</strong>
+                (many contracts offer a 1&ndash;5% step-up); leave it at 0% for a level payment.</li>
             </ul>
           </section>
 
@@ -1230,6 +1374,36 @@
               <li><strong>Guyton-Klinger guardrails</strong> &mdash; cut spending after bad markets, raise it after good ones, within upper/lower guardrails.</li>
               <li><strong>Vanguard dynamic spending</strong> &mdash; a ceiling-and-floor rule that caps how much the withdrawal can rise or fall year to year.</li>
             </ul>
+            <p>
+              Separately, an optional <strong>Blanchett Spending Smile</strong> (a checkbox on the spend step) bends
+              real spending along an age curve instead of holding it flat for life &mdash; the pattern in the
+              research where retirees spend a little more early, taper through the go-go and slow-go years, then see
+              costs tick back up late in life for healthcare.
+            </p>
+            <p>
+              <strong>How the smile is calculated.</strong> Your Bucket&nbsp;1 amount is the <strong>Year-1
+              baseline</strong> (call it E&#8320;). Each later year&rsquo;s real spending is the prior year&rsquo;s
+              multiplied by an age-based rate of change, taken from David Blanchett&rsquo;s fitted model of real
+              retiree spending (<em>Estimating the True Cost of Retirement</em>, using Health and Retirement Study
+              data):
+            </p>
+            <p class="methodology__formula">r&Delta;S(age) = 0.00008 &middot; age&sup2; &minus; 0.0125 &middot; age + 0.474589</p>
+            <p>
+              That rate is applied year over year &mdash; the multiplier for year <em>t</em> is
+              R<sub>t</sub> = R<sub>t&minus;1</sub> &times; (1 + r&Delta;S at the prior age), starting from
+              R&#8321; = 1.0. The rate is slightly positive in early retirement (real spending edges up to a peak
+              around age&nbsp;65), turns negative through the 70s and 80s, and rises again past the early 90s &mdash;
+              the healthcare-driven upturn that gives the curve its &ldquo;smile.&rdquo; For a $100,000 baseline
+              starting at age&nbsp;60, real spending runs about $103,700 at&nbsp;65, $101,800 at&nbsp;70, $90,300 at
+              80, and $84,800 at&nbsp;85.
+            </p>
+            <p>
+              When the smile is on, each 5-year bucket displays the <strong>average</strong> of those yearly amounts
+              in today&rsquo;s dollars, so you can see exactly what the curve feeds the model. The smile shapes the
+              expense-schedule paths (the fixed schedule and forgo-inflation); the dynamic strategies above compute
+              their own path. As everywhere else, spending is figured in real terms and then inflated along each
+              simulation&rsquo;s bootstrapped inflation path.
+            </p>
           </section>
 
           <section class="methodology__section">
