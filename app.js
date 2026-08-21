@@ -1207,7 +1207,8 @@ function renderPeriodicTable() {
    assets, holding the Simulator tab's plan (balance, horizon, spending,
    income, strategy, period) fixed, and — in the engine phase — runs each
    candidate through the same Monte Carlo worker to find the portfolio with
-   the highest real median CAGR that still clears the user's success floor.
+   the highest real median ending value that still clears the user's success
+   floor (and drawdown cap, if set).
 
    Phase 1 (this block): controls, constrained-grid enumeration/count with
    per-asset min/max caps, live candidate-count + runtime preview, and the
@@ -1993,8 +1994,8 @@ function renderOptimizerStep1Table(run) {
   });
   html += `</tbody></table>`;
   const winCond = run.ddCap != null
-    ? `the highest real median CAGR that clears your ${run.floorPct}% success floor and ${run.ddCap}% drawdown cap`
-    : `the highest real median CAGR that still clears your ${run.floorPct}% floor`;
+    ? `the highest real median ending value that clears your ${run.floorPct}% success floor and ${run.ddCap}% drawdown cap`
+    : `the highest real median ending value that still clears your ${run.floorPct}% floor`;
   html += `<p class="field-note small">Stocks = ${escapeHtml(eqName)} · Bonds = ${escapeHtml(fiName)}. Winner (highlighted) = ${winCond}.</p>`;
   wrap.innerHTML = html;
 }
@@ -2446,7 +2447,8 @@ function renderOptimizerStep2Results(res, meta) {
 
   const meta1 = `<p class="optimizer-meta field-note small">Ran <strong>${total.toLocaleString('en-US')}</strong> portfolios × ${N.toLocaleString('en-US')} sims in ${(elapsedMs / 1000).toFixed(1)}s · ${step}% sub-class grid, split locked at ${E}/${F}${invalidCount ? ` · ${invalidCount} skipped` : ''}. Success/CAGR are Monte-Carlo estimates — re-check the winner in the Simulator at full sims.</p>`;
 
-  box.innerHTML = headline + chartCard + actions + table + meta1;
+  const selectionNote = best ? optimizerSelectionNote(ddCap, 'mix') : '';
+  box.innerHTML = headline + selectionNote + chartCard + actions + table + meta1;
 
   if (pick) renderOptimizerStep2Chart(res, meta);
 
@@ -3162,12 +3164,27 @@ function rederiveOptimizerResults() {
   });
 }
 
+// Pick the winner from a pool of qualifying portfolios (each already clears the
+// success floor and, if set, the drawdown cap). The winner is simply the one that
+// ends with the most money — the highest real median ending wealth. That is the
+// plainest definition of "best" for a retirement plan and the easiest to explain:
+// the success floor and drawdown cap decide which mixes are eligible, and among
+// the eligible ones the richest ending value wins. Ending value is a dollar figure
+// so exact ties don't occur; no secondary tie-break is needed. A missing/NaN
+// ending value sorts worst so a measured one is always preferred.
+function pickOptimizerWinner(pool) {
+  if (!pool.length) return null;
+  const ev = (p) => (Number.isFinite(p.ending_wealth_real) ? p.ending_wealth_real : -Infinity);
+  return pool.reduce((a, b) => (ev(b) > ev(a) ? b : a));
+}
+
 // Identify the winning portfolio + the Pareto-efficient frontier, and tag every
-// point with meets_floor / meets_dd / qualifies / on_frontier. "Best" = max real
-// median CAGR among points clearing BOTH the success floor AND the max-drawdown
-// cap (ddCap = a magnitude %, e.g. 35; null = off). If none qualify, expose the
-// closest (highest success among cap-respecting points, else overall). Drawdown
-// is stored negative (e.g. -32.5), so "|dd| ≤ cap" is "mdd ≥ -cap".
+// point with meets_floor / meets_dd / qualifies / on_frontier. "Best" = the
+// pickOptimizerWinner choice among points clearing BOTH the success floor AND the
+// max-drawdown cap (ddCap = a magnitude %, e.g. 35; null = off): the highest real
+// median ending wealth among the eligible mixes. If none qualify, expose the
+// closest (highest success among cap-respecting points, else overall). Drawdown is
+// stored negative (e.g. -32.5), so "|dd| ≤ cap" is "mdd ≥ -cap".
 function computeOptimizerResults(points, floorPct, ddCap = null) {
   const valid = points.filter((p) => !p.invalid && p.cagr_real_median != null && Number.isFinite(p.cagr_real_median));
   const meetsDD = (p) => ddCap == null || (p.mdd_investment_median != null && p.mdd_investment_median >= -ddCap);
@@ -3176,7 +3193,7 @@ function computeOptimizerResults(points, floorPct, ddCap = null) {
   let closest = null;
   const qualifying = valid.filter((p) => p.success_rate_pct >= floorPct && meetsDD(p));
   if (qualifying.length) {
-    best = qualifying.reduce((a, b) => (b.cagr_real_median > a.cagr_real_median ? b : a));
+    best = pickOptimizerWinner(qualifying);
   } else if (valid.length) {
     // No portfolio clears both constraints. Closest = highest success among the
     // cap-respecting points (if any), else highest success overall.
@@ -3287,6 +3304,23 @@ function optimizerConstraintLabel(floorPct, ddCap) {
   return ddCap != null ? `${s} & max drawdown ${ddCap}%` : s;
 }
 
+// Top-of-results callout explaining how the winner is chosen, so a "best" that
+// isn't the top row on every column reads as deliberate. `unit` is "portfolio"
+// (free mode) or "mix" (locked-split mode). Only shown when a qualifying winner
+// exists.
+function optimizerSelectionNote(ddCap, unit = 'portfolio') {
+  const units = unit === 'mix' ? 'mixes' : `${unit}s`;
+  const clears = ddCap != null
+    ? 'your success floor and drawdown cap'
+    : 'your success floor';
+  return `<p class="field-note field-note--accent optimizer-selection-note">` +
+    `<strong>How the winner is chosen:</strong> the ${unit} that ends with the most money — ` +
+    `the highest real <em>median</em> ending value — among the ${units} that clear ${clears}. ` +
+    `${ddCap != null ? 'Your success floor and drawdown cap decide' : 'Your success floor decides'} which ${units} are eligible; ` +
+    `success, CAGR, and drawdown are shown for context, but the winner itself is picked on ending value alone.` +
+  `</p>`;
+}
+
 function renderOptimizerResults(res, meta) {
   const box = document.getElementById('optimizer-results');
   if (!box) return;
@@ -3382,7 +3416,8 @@ function renderOptimizerResults(res, meta) {
 
   const meta1 = `<p class="optimizer-meta field-note small">Ran <strong>${total.toLocaleString('en-US')}</strong> portfolios × ${N.toLocaleString('en-US')} sims in ${(elapsedMs / 1000).toFixed(1)}s · ${step}% weight grid${invalidCount ? ` · ${invalidCount} skipped (no data in period)` : ''}. Success/CAGR are Monte-Carlo estimates at ${N.toLocaleString('en-US')} sims — re-check the winner in the Simulator at full sims.</p>`;
 
-  box.innerHTML = headline + chartCard + actions + table + meta1;
+  const selectionNote = best ? optimizerSelectionNote(ddCap, 'portfolio') : '';
+  box.innerHTML = headline + selectionNote + chartCard + actions + table + meta1;
 
   if (res.valid && res.valid.length) renderOptimizerFreeChart(res, meta);
 
