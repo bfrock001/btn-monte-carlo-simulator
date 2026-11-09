@@ -3692,46 +3692,27 @@ function render() {
 }
 
 function buildRowsForPeriod(periodKey) {
-  // Each row joins asset metadata with the period stats block.
-  // For native/postwar/modern, stats are pre-computed in the JSON.
-  // For 'custom', we recompute stats on the fly from annual_returns over the
-  // user-selected [start, end] window. Assets with no rows in the window are
-  // dropped from the table.
-  if (periodKey === 'custom') {
-    const { start, end } = STATE.customRange;
-    return STATE.assets
-      .map((a) => {
-        const stats = computeAssetStatsForRange(a, start, end);
-        if (!stats || stats.n === 0) return null;
-        return {
-          key: a.key, name: a.name, ticker: a.ticker, group: a.group,
-          native_start: a.native_start, splice_note: a.splice_note, quality: a.quality,
-          ...stats,
-        };
-      })
-      .filter(Boolean);
-  }
+  // Each row shows each asset's stats computed over its OWN available years
+  // within the selected range (not a group-wide common-years intersection).
+  // Example: on Modern (1972–2025), Intl Developed uses 1972–2025 (54 yrs)
+  // while TIPS uses 1997–2025 (29 yrs) — rather than everyone clamped to
+  // 1976 because EM's data starts there. The pre-computed a.stats?.[period]
+  // blocks in the JSON were intersected per-group during the build and so
+  // were misleading here; we ignore them and recompute client-side.
+  const [start, end] = periodKey === 'custom'
+    ? [STATE.customRange.start, STATE.customRange.end]
+    : [PERIOD_LABELS[periodKey].start, PERIOD_LABELS[periodKey].end];
+
   return STATE.assets
     .map((a) => {
-      const stats = a.stats?.[periodKey];
-      if (!stats || stats.n == null) return null;
+      const stats = computeAssetStatsForRange(a, start, end);
+      if (!stats || stats.n === 0) return null;
       return {
-        key: a.key,
-        name: a.name,
-        ticker: a.ticker,
-        group: a.group,
-        native_start: a.native_start,
-        splice_note: a.splice_note,
-        quality: a.quality,
-        first_year: stats.first_year,
-        n: stats.n,
-        cagr: stats.cagr,
-        mean: stats.mean,
-        std: stats.std,
-        sharpe: stats.sharpe,
-        min: stats.min,
-        max: stats.max,
-        avg_rf: stats.avg_rf,
+        key: a.key, name: a.name, ticker: a.ticker, group: a.group,
+        native_start: a.native_start, splice_note: a.splice_note, quality: a.quality,
+        range_start: start,
+        late_start: stats.first_year != null && stats.first_year > start,
+        ...stats,
       };
     })
     .filter(Boolean);
@@ -3877,7 +3858,7 @@ function renderTable(rows) {
 
     tr.appendChild(cellAsset(r));
     tr.appendChild(cellMonoText(r.ticker, 'ticker'));
-    tr.appendChild(cellYear(r.first_year));
+    tr.appendChild(cellYear(r.first_year, r.late_start ? r.range_start : null));
     tr.appendChild(cellNum(r.n, 0));
     tr.appendChild(cellPct(r.cagr));
     tr.appendChild(cellPct(r.std));
@@ -3945,11 +3926,27 @@ function cellNum(value, decimals) {
   return td;
 }
 
-function cellYear(value) {
+function cellYear(value, rangeStartIfLate) {
   // Years should never get a thousands separator (e.g. "1976", not "1,976").
+  // When rangeStartIfLate is a number, the asset's data starts after the
+  // selected range began — tag it inline so the row's n/CAGR context is
+  // obvious at a glance.
   const td = document.createElement('td');
   td.className = 'num';
   if (value == null) { td.textContent = '—'; td.classList.add('dash'); return td; }
+  if (rangeStartIfLate != null) {
+    td.classList.add('year-late-start');
+    const yr = document.createElement('span');
+    yr.className = 'year-value';
+    yr.textContent = String(value);
+    const pill = document.createElement('span');
+    pill.className = 'badge badge--late-start';
+    pill.textContent = 'late start';
+    pill.title = `Range begins ${rangeStartIfLate}; this asset's data starts ${value}.`;
+    td.appendChild(yr);
+    td.appendChild(pill);
+    return td;
+  }
   td.textContent = String(value);
   return td;
 }
